@@ -190,27 +190,27 @@ def _generate_question(tabs: list[dict], history: list[dict], index: int) -> dic
     hist_str = json.dumps(history, indent=2) if history else "No answers yet."
     
     prompt = (
-        "You are Momentum, a highly observant and empathetic productivity coach. "
-        "Review the user's open tabs and their past answers.\n\n"
-        f"This is Question {index} of 3. Generate ONE short, highly conversational clarifying question "
-        "and 3-4 multiple-choice answer options to understand what they are trying to achieve or why they are stuck.\n\n"
-        "CRITICAL RULE: Your question MUST explicitly reference their actual tabs. "
-        "Mention specific topics, domains, or the amount of tabs open. "
-        "Example Good Question: 'You have 8 tabs open about Python authentication. What is your current goal?'\n"
-        "Example Bad Question: 'What are you working on right now?'\n\n"
-        "Return ONLY a JSON object with exactly these keys:\n"
-        "- question: string\n"
-        "- options: list of 3-4 short strings\n\n"
-        "Respond with valid JSON only. Start with { and end with }."
+        "You are Momentum, a snappy, observant productivity sidekick. "
+        "Review the user's specific tabs and previous choices.\n\n"
+        f"Goal: This is Question {index} of 3. Ask ONE extremely short question.\n\n"
+        "STRICT CONSTRAINTS:\n"
+        "1. NO INTRO: Do not start with 'I see', 'You have been', or any observation. Jump straight to the question.\n"
+        "2. ULTRA SPECIFIC: Mention a specific word, project, or domain from the tabs IMMEDIATELY.\n"
+        "3. NO REPETITION: Do not ask about things already in the history.\n"
+        "4. SECOND PERSON: Use 'You/Your' only.\n"
+        "5. LENGTH: Under 10 words.\n\n"
+        "Example Good: 'Stuck on that React state bug or moving on?'\n"
+        "Example Bad: 'You have been looking at React tabs. Are you stuck or moving on?'\n\n"
+        "Return ONLY a JSON object: {\"question\": \"...\", \"options\": [\"...\", \"...\"]}"
     )
     
     try:
-        raw = _call_ollama(prompt, f"TABS:\n{summary}\n\nHISTORY:\n{hist_str}")
+        raw = _call_ollama(prompt, f"HISTORY OF QUESTIONS ALREADY ASKED AND ANSWERED:\n{hist_str}\n\nUSER'S OPEN TABS:\n{summary}")
         return _parse_json(raw)
     except:
         return {
-            "question": f"I see you have {len(tabs)} tabs open. What is your main focus right now?",
-            "options": ["Just getting started", "Stuck on a bug", "Finishing up", "Taking a break"]
+            "question": f"Nice—{len(tabs)} tabs deep! What's the main goal?",
+            "options": ["Just starting", "Stuck on a bug", "Finishing up", "Taking a break"]
         }
 
 def _generate_final_insight(tabs: list[dict], history: list[dict]) -> dict:
@@ -218,12 +218,13 @@ def _generate_final_insight(tabs: list[dict], history: list[dict]) -> dict:
     hist_str = json.dumps(history, indent=2)
     
     prompt = (
-        "You are Momentum, a thoughtful, warm productivity colleague. "
-        "Review the user's tabs and their clarification answers. "
+        "You are Momentum, a warm, sidekick productivity colleague. "
+        "Review the user's tabs and their choices in the history.\n\n"
+        "CRITICAL: Always speak in the SECOND PERSON ('You', 'Your'). Speak directly to the user.\n\n"
         "Return ONLY a JSON object with exactly these keys:\n"
-        "- working_on: one specific sentence referencing their goal based on tabs and history.\n"
-        "- next_action: one hyper-specific first step, including file names or URLs.\n"
-        "- stuck_signal: one sentence or null if they are completely focused.\n"
+        "- working_on: one specific sentence addressing the user ('You are working on X...')\n"
+        "- next_action: one hyper-specific first step directed at the user ('Next, you should...')\n"
+        "- stuck_signal: one sentence addressing the user ('You seem a bit stuck on X...') or null.\n"
         "- memory_summary: a 2-3 sentence paragraph in second person summarising their session warmly (e.g. 'You're deep into X...').\n"
         "- supporting_tasks: a JSON array of exactly 2 to 3 small related secondary tasks that suit the current project. Each must be a JSON object: {\"task\": \"Specific short task\", \"energy\": \"high\" | \"medium\" | \"low\"}\n\n"
         "Respond with valid JSON only. Start with { and end with }."

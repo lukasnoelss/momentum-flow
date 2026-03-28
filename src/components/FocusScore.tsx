@@ -70,7 +70,7 @@ const FocusScore = ({ score, label }: FocusScoreProps) => {
 
         {/* Score number */}
         <span
-          className={`text-7xl ${c.text} relative z-10 drop-shadow-lg`}
+          className={`text-6xl ${c.text} relative z-10 drop-shadow-lg`}
           style={{ fontFamily: 'Inter, system-ui', fontWeight: 200, letterSpacing: '-0.04em' }}
         >
           {score}

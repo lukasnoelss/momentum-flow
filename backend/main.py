@@ -14,13 +14,20 @@ import os
 from typing import Optional
 
 import httpx
+import google.generativeai as genai
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-load_dotenv()
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# Ensure .env is loaded from the correct folder
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(env_path)
+
+# SDKs often look for GOOGLE_API_KEY or GEMINI_API_KEY
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
 
 # ── CONFIG ─────────────────────────────────────────────────────────
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -132,7 +139,7 @@ def _build_tab_summary(tabs: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _call_ollama(system: str, user: str) -> str:
+def _call_ollama(system: str, user: str, temp: float = 0.1) -> str:
     """Call Ollama's OpenAI-compatible chat endpoint synchronously."""
     try:
         resp = httpx.post(
@@ -144,6 +151,7 @@ def _call_ollama(system: str, user: str) -> str:
                     {"role": "user", "content": user},
                 ],
                 "stream": False,
+                "temperature": temp
             },
             timeout=180.0,
         )
@@ -153,66 +161,97 @@ def _call_ollama(system: str, user: str) -> str:
         print(f"Ollama Error: {e}", file=sys.stderr)
         raise
 
+def _call_gemini(system: str, user: str, temp: float = 0.1) -> str:
+    """Call Google Gemini API."""
+    try:
+        model = genai.GenerativeModel(
+            model_name="gemini-3.1-pro-preview",
+            system_instruction=system
+        )
+        response = model.generate_content(
+            user,
+            generation_config=genai.types.GenerationConfig(temperature=temp)
+        )
+        return response.text
+    except Exception as e:
+        print(f"Gemini API Error: {e}", file=sys.stderr)
+        raise
+
+def _call_ai(system: str, user: str, temp: float = 0.1) -> str:
+    """Generic AI caller: Gemini first, Ollama as fallback."""
+    if GOOGLE_API_KEY:
+        try:
+            print(f"--- AI CALL (Gemini) ---\nSystem: {system[:200]}...\nUser: {user[:200]}...", file=sys.stderr)
+            res = _call_gemini(system, user, temp)
+            print(f"--- AI RESPONSE ---\n{res[:200]}...", file=sys.stderr)
+            return res
+        except Exception as e:
+            print(f"Gemini failed, falling back to Ollama: {e}", file=sys.stderr)
+    return _call_ollama(system, user, temp)
+
 def _parse_json(raw: str) -> dict:
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1]
-        if text.endswith("```"):
-            text = text[:-3].strip()
-    first_brace = text.find("{")
-    last_brace = text.rfind("}")
-    if first_brace != -1 and last_brace != -1:
-        text = text[first_brace : last_brace + 1]
-    return json.loads(text)
+    try:
+        text = raw.strip()
+        # Handle thinking/markdown blocks
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace != -1:
+            text = text[first_brace : last_brace + 1]
+        
+        return json.loads(text)
+    except Exception as e:
+        print(f"JSON Parse Error: {e}\nRaw Content: {raw}", file=sys.stderr)
+        raise
 
 def _generate_focus_score(tabs: list[dict]) -> dict:
     summary = _build_tab_summary(tabs)
     prompt = (
-        "You are Momentum, a productivity AI. Analyse the user's open tabs and return ONLY a JSON object with:\n"
+        "You are Momentum. Analyse the user's open tabs and return ONLY a JSON object with:\n"
         "- focus_score: integer 0-100.\n"
         "- focus_label: 'Deep focus', 'Getting scattered', or 'Highly fragmented'.\n\n"
-        "Respond with valid JSON only. Start with { and end with }."
+        "Respond with valid JSON only."
     )
     
     try:
-        raw = _call_ollama(prompt, summary)
+        raw = _call_ai(prompt, summary, temp=0.4)
         return _parse_json(raw)
     except:
         return {"focus_score": 50, "focus_label": "Getting scattered"}
 
-def _generate_question(tabs: list[dict], history: list[dict], index: int) -> dict:
-    summary = _build_tab_summary(tabs)
-    
-    # Cap massive tab payloads to keep the 1B model sharply focused on the system instructions
-    if len(summary) > 4000:
-        summary = summary[:4000] + "\n...[truncated]"
-
-    hist_str = json.dumps(history, indent=2) if history else "No answers yet."
+def _generate_question(tabs: list[dict], history: list[dict], index: int, prev_context: str = "") -> dict:
+    # Richer snippets for Pro
+    tab_snippets = [f"- {t.get('title')} ({t.get('url', '').split('/')[2] if '//' in t.get('url', '') else ''})\n  Snippet: {(t.get('text') or '')[:300]}" for t in tabs[:10]]
+    medium_summary = "\n".join(tab_snippets)
+    hist_str = json.dumps(history, indent=2) if history else "Start of session."
     
     prompt = (
-        "You are Momentum, a snappy, observant productivity sidekick. "
-        "Review the user's specific tabs and previous choices.\n\n"
-        f"Goal: This is Question {index} of 3. Ask ONE extremely short question.\n\n"
-        "STRICT CONSTRAINTS:\n"
-        "1. NO INTRO: Do not start with 'I see', 'You have been', or any observation. Jump straight to the question.\n"
-        "2. ULTRA SPECIFIC: Mention a specific word, project, or domain from the tabs IMMEDIATELY.\n"
-        "3. NO REPETITION: Do not ask about things already in the history.\n"
-        "4. SECOND PERSON: Use 'You/Your' only.\n"
-        "5. LENGTH: Under 10 words.\n\n"
-        "Example Good: 'Fixing that CSS grid or just exploring layout?'\n"
-        "Example Bad: 'You have been looking at CSS tabs. Are you stuck?'\n\n"
-        "6. NO PLACEHOLDERS: Never return '...', 'etc', or 'unknown' in the options. Use real words.\n\n"
-        "Return ONLY a JSON object: {\"question\": \"Question text?\", \"options\": [\"Option 1\", \"Option 2\"]}"
+        "You are a helpful productivity sidekick. Ask ONE follow-up question based on tabs, history, and where they left off.\n\n"
+        f"Goal: This is Question {index} of 3. Explore a new sub-project or a block.\n\n"
+        "STRICT RULES:\n"
+        "1. NO DUPES: Look at HISTORY first. NEVER repeat or rephrase those questions.\n"
+        "2. CONTEXT: Refer to specific files, topics, or domains from the TABS naturally.\n"
+        "3. MEMORY: Use 'PREVIOUS CONTEXT' to see where they were before this scan. Bridge the gap.\n"
+        "4. SECOND PERSON: Speak directly to the user.\n"
+        "5. JSON ONLY: {\"question\": \"...\", \"options\": [\"Option A\", \"Option B\"]}"
     )
     
+    full_user = f"PREVIOUS CONTEXT (WHERE THEY LEFT OFF):\n{prev_context}\n\nHISTORY (DO NOT REPEAT):\n{hist_str}\n\nUSER TABS:\n{medium_summary}"
+    
     try:
-        raw = _call_ollama(prompt, f"HISTORY OF QUESTIONS ALREADY ASKED AND ANSWERED:\n{hist_str}\n\nUSER'S OPEN TABS:\n{summary}")
+        raw = _call_ai(prompt, full_user, temp=0.7)
         return _parse_json(raw)
     except:
-        return {
-            "question": f"Nice—{len(tabs)} tabs deep! What's the main goal?",
-            "options": ["Just starting", "Stuck on a bug", "Finishing up", "Taking a break"]
+        fallbacks = {
+            1: {"question": f"Making headway on those {len(tabs)} tabs?", "options": ["Just starting", "Stuck", "Wrapping up", "Need a break"]},
+            2: {"question": "And where do you want to get to by the end of this hour?", "options": ["Finish feature", "Fix bug", "Clean up", "Researching"]},
+            3: {"question": "Got it. Anything else I should know before we start?", "options": ["Nope", "In a rush", "Stuck on something", "Taking it slow"]}
         }
+        return fallbacks.get(index, fallbacks[1])
 
 def _generate_final_insight(tabs: list[dict], history: list[dict]) -> dict:
     summary = _build_tab_summary(tabs)
@@ -226,13 +265,14 @@ def _generate_final_insight(tabs: list[dict], history: list[dict]) -> dict:
         "- working_on: a short label for the current task/project (e.g. 'debugging my API' or 'designing the login page'). DO NOT start with 'You are'.\n"
         "- next_action: one hyper-specific first step directed at the user ('Next, you should...')\n"
         "- stuck_signal: one sentence addressing the user ('You seem a bit stuck on X...') or null.\n"
-        "- memory_summary: a 2-3 sentence paragraph in second person summarising their session warmly (e.g. 'You're deep into X...').\n"
+        "- memory_summary: a punchy, casual 1-2 sentence vibe-check (max 30 words). Speak like a smart colleague. No generic praise or 'dedicated time' fluff. Focus on the actual work context.\n"
         "- supporting_tasks: a JSON array of exactly 2 to 3 small related secondary tasks that suit the current project. Each must be a JSON object: {\"task\": \"Specific short task\", \"energy\": \"high\" | \"medium\" | \"low\"}\n\n"
+        "Example memory_summary: 'You've been hacking on the React state for X—solid progress. Let's nail those side effects next.'\n\n"
         "Respond with valid JSON only. Start with { and end with }."
     )
     
     try:
-        raw = _call_ollama(prompt, f"TABS:\n{summary}\n\nHISTORY:\n{hist_str}")
+        raw = _call_ai(prompt, f"TABS:\n{summary}\n\nHISTORY:\n{hist_str}", temp=0.4)
         return _parse_json(raw)
     except:
         return {
@@ -251,13 +291,13 @@ def receive_tabs(payload: TabPayload):
     if not payload.tabs:
         raise HTTPException(status_code=400, detail="No tabs provided.")
 
-    tabs_dump = [t.dict() for t in payload.tabs]
-    
+    conn = _get_db()
+    prev = conn.execute("SELECT working_on FROM sessions WHERE is_draft = 0 ORDER BY id DESC LIMIT 1").fetchone()
+    prev_str = f"Prev session was: {prev['working_on']}" if prev and prev['working_on'] else "No previous session."
+
     # Generate initial focus score & Q1
     score_data = _generate_focus_score(tabs_dump)
-    q1_data = _generate_question(tabs_dump, [], 1)
-
-    conn = _get_db()
+    q1_data = _generate_question(tabs_dump, [], 1, prev_str)
     conn.execute(
         """
         INSERT INTO sessions (
@@ -345,8 +385,12 @@ def clarify_endpoint(payload: ClarifyPayload):
         conn.close()
         return {"status": "complete"}
     else:
+        # Fetch memory for Q2/Q3 context too
+        prev_row = conn.execute("SELECT working_on FROM sessions WHERE is_draft = 0 ORDER BY id DESC LIMIT 1").fetchone()
+        prev_str = f"Previously: {prev_row['working_on']}" if prev_row and prev_row['working_on'] else ""
+
         # Generate Next Question
-        q_data = _generate_question(tabs, history, q_index)
+        q_data = _generate_question(tabs, history, q_index, prev_str)
         conn.execute(
             """
             UPDATE sessions 

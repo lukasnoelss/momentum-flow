@@ -43,7 +43,7 @@ const SecondaryTasks = ({
             className="border-muted-foreground/40"
           />
           <span
-            className={`text-sm flex-1 truncate ${
+            className={`text-sm flex-1 py-0.5 ${
               t.done ? "line-through text-muted-foreground" : "text-foreground"
             }`}
           >

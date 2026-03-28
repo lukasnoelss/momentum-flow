@@ -94,25 +94,30 @@ const Index = () => {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
+          {streakDays > 0 && (
+            <div className="streak-shimmer text-primary-foreground px-4 py-2 rounded-full flex items-center gap-2 shadow-lg shadow-primary/25">
+              <Flame className="w-4 h-4 drop-shadow-lg" />
+              <span className="text-xs font-bold">{streakDays}d streak</span>
+            </div>
+          )}
           <button
             onClick={() => { setWelcomeDismissed(true); scanMutation.mutate(); }}
             disabled={scanMutation.isPending}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-50 shadow-lg shadow-primary/20"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-card border border-border/60 text-foreground hover:border-primary/30 hover:shadow-md transition-all disabled:opacity-50"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${scanMutation.isPending ? "animate-spin" : ""}`} />
-            <span>{scanMutation.isPending ? "Scanning…" : "Update data"}</span>
+            <RefreshCw className={`w-3.5 h-3.5 text-primary ${scanMutation.isPending ? "animate-spin" : ""}`} />
+            <span>{scanMutation.isPending ? "Scanning…" : "Sync"}</span>
           </button>
-          <div className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium ${focusError ? "bg-score-low/15 text-score-low" : "bg-primary/10 text-primary"}`}>
+          <div className={`flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-semibold ${
+            focusError
+              ? "bg-score-low/10 text-score-low border border-score-low/20"
+              : "bg-score-high/10 text-score-high border border-score-high/20"
+          }`}>
             {focusError ? <WifiOff className="w-3 h-3" /> : <Wifi className="w-3 h-3" />}
             <span>{focusError ? "Offline" : "Live"}</span>
+            {!focusError && <span className="w-1.5 h-1.5 rounded-full bg-score-high animate-pulse" />}
           </div>
-          {streakDays > 0 && (
-            <div className="streak-shimmer text-primary-foreground px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-lg shadow-primary/20">
-              <Flame className="w-4 h-4" />
-              <span className="text-sm font-bold">{streakDays} day streak</span>
-            </div>
-          )}
         </div>
       </div>
 

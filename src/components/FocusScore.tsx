@@ -36,10 +36,10 @@ const FocusScore = ({ score, label }: FocusScoreProps) => {
   const offset = circumference - (score / 100) * circumference;
 
   return (
-    <div className="flex flex-col items-center gap-4 py-6">
-      <div className="relative flex items-center justify-center w-40 h-40">
+    <div className="flex flex-col items-center gap-4 py-7">
+      <div className="relative flex items-center justify-center w-44 h-44">
         {/* Deep aura */}
-        <div className={`absolute inset-[-20px] rounded-full ${c.glow} orb-aura`} />
+        <div className={`absolute inset-[-24px] rounded-full ${c.glow} orb-aura`} />
 
         {/* Spinning gradient ring */}
         <div className="absolute inset-[-4px] rounded-full orb-ring-spin"

@@ -46,7 +46,7 @@ const Index = () => {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-display text-foreground">
+          <h1 className="text-3xl md:text-4xl font-display text-foreground">
             {greeting()}, {userName}
           </h1>
         </div>

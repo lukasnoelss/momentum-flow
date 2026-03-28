@@ -142,7 +142,10 @@ const Index = () => {
               You were working on {latest.working_on}
             </h2>
             <p className="text-muted-foreground text-sm mb-8">
-              You left {Math.floor((Date.now() - new Date(latest.timestamp).getTime()) / 60000)} minutes ago. Ready to pick up where you left off?
+              {(() => {
+                const mins = Math.max(0, Math.floor((Date.now() - new Date(latest.timestamp).getTime()) / 60000));
+                return mins < 1 ? "You just left. Ready to jump back in?" : `You left ${mins} minute${mins !== 1 ? 's' : ''} ago. Ready to pick up where you left off?`;
+              })()}
             </p>
             <div className="flex flex-col gap-3">
               <button

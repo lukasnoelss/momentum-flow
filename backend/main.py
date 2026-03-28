@@ -199,9 +199,10 @@ def _generate_question(tabs: list[dict], history: list[dict], index: int) -> dic
         "3. NO REPETITION: Do not ask about things already in the history.\n"
         "4. SECOND PERSON: Use 'You/Your' only.\n"
         "5. LENGTH: Under 10 words.\n\n"
-        "Example Good: 'Stuck on that React state bug or moving on?'\n"
-        "Example Bad: 'You have been looking at React tabs. Are you stuck or moving on?'\n\n"
-        "Return ONLY a JSON object: {\"question\": \"...\", \"options\": [\"...\", \"...\"]}"
+        "Example Good: 'Fixing that CSS grid or just exploring layout?'\n"
+        "Example Bad: 'You have been looking at CSS tabs. Are you stuck?'\n\n"
+        "6. NO PLACEHOLDERS: Never return '...', 'etc', or 'unknown' in the options. Use real words.\n\n"
+        "Return ONLY a JSON object: {\"question\": \"Question text?\", \"options\": [\"Option 1\", \"Option 2\"]}"
     )
     
     try:
@@ -222,7 +223,7 @@ def _generate_final_insight(tabs: list[dict], history: list[dict]) -> dict:
         "Review the user's tabs and their choices in the history.\n\n"
         "CRITICAL: Always speak in the SECOND PERSON ('You', 'Your'). Speak directly to the user.\n\n"
         "Return ONLY a JSON object with exactly these keys:\n"
-        "- working_on: one specific sentence addressing the user ('You are working on X...')\n"
+        "- working_on: a short label for the current task/project (e.g. 'debugging my API' or 'designing the login page'). DO NOT start with 'You are'.\n"
         "- next_action: one hyper-specific first step directed at the user ('Next, you should...')\n"
         "- stuck_signal: one sentence addressing the user ('You seem a bit stuck on X...') or null.\n"
         "- memory_summary: a 2-3 sentence paragraph in second person summarising their session warmly (e.g. 'You're deep into X...').\n"
@@ -266,7 +267,7 @@ def receive_tabs(payload: TabPayload):
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            datetime.datetime.utcnow().isoformat(),
+            datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
             len(tabs_dump),
             score_data.get("focus_score", 50),
             score_data.get("focus_label", "Getting scattered"),

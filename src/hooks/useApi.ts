@@ -49,12 +49,12 @@ async function get<T>(path: string): Promise<T> {
 
 // ── hooks ──────────────────────────────────────────────────────────────────
 
-/** Polls /focus every 15 seconds — drives the live score on the dashboard */
+/** Polls /focus every 10 seconds — drives the live score on the dashboard */
 export function useFocus() {
   return useQuery<FocusData>({
     queryKey: ["focus"],
     queryFn: () => get<FocusData>("/focus"),
-    refetchInterval: 15_000,
+    refetchInterval: 10_000,
     retry: false,
   });
 }
@@ -96,17 +96,23 @@ export function useScan() {
   });
 }
 
-/** Sends a chat message to the backend and returns the AI's reply */
-export function useChat() {
+/** Skips the question flow and generates insight from tabs alone */
+export function useSkip() {
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: { messages: { role: "ai" | "user" | "system", content: string }[] }) => {
-      const res = await fetch(`${BASE}/chat`, {
+    mutationFn: async (payload: { session_id: number }) => {
+      const res = await fetch(`${BASE}/skip`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error("Chat request failed");
-      return await res.json() as { reply: string };
+      if (!res.ok) throw new Error("Skip failed");
+      return await res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["focus"] });
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["memory"] });
     },
   });
 }

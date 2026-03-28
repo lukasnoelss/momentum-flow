@@ -6,12 +6,14 @@ everything to the React frontend.
 """
 
 import json
+import re
 import sqlite3
 import sys
 import subprocess
 import datetime
 import os
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 from dotenv import load_dotenv
@@ -19,8 +21,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-load_dotenv()
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# Ensure .env is loaded from the correct folder
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(env_path)
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
 # ── CONFIG ─────────────────────────────────────────────────────────
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -91,17 +96,13 @@ class ClarifyPayload(BaseModel):
     session_id: int
     answer: str
 
+class SkipPayload(BaseModel):
+    session_id: int
+
 class TaskTogglePayload(BaseModel):
     session_id: int
     task_index: int
     done: bool
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-class ChatPayload(BaseModel):
-    messages: list[ChatMessage]
 
 @app.post("/tasks/toggle")
 def toggle_task(payload: TaskTogglePayload):
@@ -122,7 +123,9 @@ def toggle_task(payload: TaskTogglePayload):
     conn.close()
     return {"success": True}
 
-# ── OLLAMA HELPERS ─────────────────────────────────────────────────
+# ── LLM HELPERS ────────────────────────────────────────────────────
+
+GEMINI_MODEL = "gemini-2.5-flash-preview-04-17"
 
 def _build_tab_summary(tabs: list[dict]) -> str:
     lines: list[str] = []
@@ -145,7 +148,7 @@ def _call_ollama(system: str, user: str) -> str:
                 ],
                 "stream": False,
             },
-            timeout=180.0,
+            timeout=httpx.Timeout(20.0, connect=5.0),
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
@@ -153,65 +156,252 @@ def _call_ollama(system: str, user: str) -> str:
         print(f"Ollama Error: {e}", file=sys.stderr)
         raise
 
+
+def _call_gemini(system: str, user: str, response_schema: dict | None = None) -> str:
+    """Call Gemini via the generateContent API."""
+    gen_config: dict = {"temperature": 0.7}
+    if response_schema:
+        gen_config["responseMimeType"] = "application/json"
+        gen_config["responseSchema"] = response_schema
+
+    payload = {
+        "system_instruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": user}]}],
+        "generationConfig": gen_config,
+    }
+    resp = httpx.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
+        json=payload,
+        timeout=httpx.Timeout(60.0, connect=10.0),
+    )
+    if not resp.is_success:
+        print(f"Gemini API error {resp.status_code}: {resp.text[:500]}", file=sys.stderr)
+        resp.raise_for_status()
+    data = resp.json()
+    parts = data["candidates"][0]["content"]["parts"]
+    for part in parts:
+        if not part.get("thought", False) and "text" in part:
+            return part["text"]
+    return parts[0]["text"]
+
+
+def _call_llm(system: str, user: str, response_schema: dict | None = None) -> str:
+    """Generic AI caller: Gemini first, Ollama as fallback on ANY error."""
+    if GEMINI_API_KEY:
+        try:
+            # Try the bleeding-edge Gemini 3 first
+            return _call_gemini(system, user, response_schema)
+        except Exception as e:
+            print(f"Gemini 3 (preview) failed/timed out: {e}. Trying stable 1.5-flash...", file=sys.stderr)
+            try:
+                # Try the ultra-stable 1.5-flash as a mid-tier fallback
+                # Note: We swap the model name for this one-off call
+                orig_model = globals()["GEMINI_MODEL"]
+                globals()["GEMINI_MODEL"] = "gemini-1.5-flash"
+                res = _call_gemini(system, user, response_schema)
+                globals()["GEMINI_MODEL"] = orig_model
+                return res
+            except Exception as e2:
+                print(f"Gemini 1.5 also failed: {e2}. Falling back to LOCAL Ollama...", file=sys.stderr)
+
+    return _call_ollama(system, user)
+
+
+# ── JSON schemas for structured Gemini output ────────────────────────────────
+
+_SCHEMA_FOCUS = {
+    "type": "object",
+    "properties": {
+        "focus_score": {"type": "integer"},
+        "focus_label": {"type": "string"},
+    },
+    "required": ["focus_score", "focus_label"],
+}
+
+_SCHEMA_QUESTION = {
+    "type": "object",
+    "properties": {
+        "question": {"type": "string"},
+        "options": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["question", "options"],
+}
+
+_SCHEMA_INSIGHT = {
+    "type": "object",
+    "properties": {
+        "working_on": {"type": "string"},
+        "next_action": {"type": "string"},
+        "stuck_signal": {"type": "string", "nullable": True},
+        "memory_summary": {"type": "string"},
+        "supporting_tasks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string"},
+                    "energy": {"type": "string", "enum": ["high", "medium", "low"]},
+                },
+                "required": ["task", "energy"],
+            },
+        },
+    },
+    "required": ["working_on", "next_action", "memory_summary", "supporting_tasks"],
+}
+
 def _parse_json(raw: str) -> dict:
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1]
-        if text.endswith("```"):
-            text = text[:-3].strip()
-    first_brace = text.find("{")
-    last_brace = text.rfind("}")
-    if first_brace != -1 and last_brace != -1:
-        text = text[first_brace : last_brace + 1]
-    return json.loads(text)
+    try:
+        text = raw.strip()
+        # Handle thinking/markdown blocks
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace != -1:
+            text = text[first_brace : last_brace + 1]
+        
+        return json.loads(text)
+    except Exception as e:
+        print(f"JSON Parse Error: {e}\nRaw Content: {raw}", file=sys.stderr)
+        raise
 
 def _generate_focus_score(tabs: list[dict]) -> dict:
     summary = _build_tab_summary(tabs)
     prompt = (
-        "You are Momentum, a productivity AI. Analyse the user's open tabs and return ONLY a JSON object with:\n"
-        "- focus_score: integer 0-100.\n"
-        "- focus_label: 'Deep focus', 'Getting scattered', or 'Highly fragmented'.\n\n"
-        "Respond with valid JSON only. Start with { and end with }."
+        "You are Momentum, a productivity AI. Analyse the user's open tabs and score their focus.\n\n"
+        "SCORING RULES:\n"
+        "1. Start at 85 (most people have a few stray tabs — that's normal).\n"
+        "2. MODERATE penalty (-8 each): clearly off-task tabs — e.g. YouTube videos, Amazon/eBay product "
+        "pages, Reddit browsing, news feeds, social media. Only penalise if there are multiple of these.\n"
+        "3. NO penalty: ambient background tabs — e.g. Spotify, Apple Music, YouTube Music, radio, "
+        "podcasts, a single reference search. These are normal while working.\n"
+        "4. SMALL penalty (-3 each): loosely related tabs — e.g. Wikipedia, a tangential tutorial, "
+        "a Stack Overflow answer on an unrelated topic.\n"
+        "5. Tabs clearly in the same work cluster (same repo, project docs, framework docs) do NOT "
+        "reduce the score — they raise confidence.\n"
+        "6. Cap minimum at 20. Cap maximum at 100.\n"
+        "7. Be generous: if the person is clearly working (code, docs, tools tabs dominate), "
+        "score should be 75+.\n\n"
+        "After scoring, pick the label:\n"
+        "- 'Deep focus' if score >= 70\n"
+        "- 'Getting scattered' if score >= 40\n"
+        "- 'Highly fragmented' if score < 40\n\n"
+        "Respond with valid JSON only: {\"focus_score\": <int>, \"focus_label\": \"<label>\"}"
     )
     
     try:
-        raw = _call_ollama(prompt, summary)
+        raw = _call_llm(prompt, summary, response_schema=_SCHEMA_FOCUS)
         return _parse_json(raw)
     except:
         return {"focus_score": 50, "focus_label": "Getting scattered"}
 
-def _generate_question(tabs: list[dict], history: list[dict], index: int) -> dict:
-    summary = _build_tab_summary(tabs)
-    
-    # Cap massive tab payloads to keep the 1B model sharply focused on the system instructions
-    if len(summary) > 4000:
-        summary = summary[:4000] + "\n...[truncated]"
+_STOP_WORDS = {
+    "the", "and", "for", "with", "this", "that", "from", "have", "are", "not",
+    "you", "your", "page", "home", "tab", "new", "tab", "com", "http", "www",
+    "about", "login", "sign", "google", "search", "docs", "open", "view",
+}
 
-    hist_str = json.dumps(history, indent=2) if history else "No answers yet."
-    
-    prompt = (
-        "You are Momentum, a snappy, observant productivity sidekick. "
-        "Review the user's specific tabs and previous choices.\n\n"
-        f"Goal: This is Question {index} of 3. Ask ONE extremely short question.\n\n"
-        "STRICT CONSTRAINTS:\n"
-        "1. NO INTRO: Do not start with 'I see', 'You have been', or any observation. Jump straight to the question.\n"
-        "2. ULTRA SPECIFIC: Mention a specific word, project, or domain from the tabs IMMEDIATELY.\n"
-        "3. NO REPETITION: Do not ask about things already in the history.\n"
-        "4. SECOND PERSON: Use 'You/Your' only.\n"
-        "5. LENGTH: Under 10 words.\n\n"
-        "Example Good: 'Fixing that CSS grid or just exploring layout?'\n"
-        "Example Bad: 'You have been looking at CSS tabs. Are you stuck?'\n\n"
-        "6. NO PLACEHOLDERS: Never return '...', 'etc', or 'unknown' in the options. Use real words.\n\n"
-        "Return ONLY a JSON object: {\"question\": \"Question text?\", \"options\": [\"Option 1\", \"Option 2\"]}"
+def _extract_tab_signals(tabs: list[dict]) -> dict:
+    """Extract specific domains and keyword signals from tabs in Python."""
+    domains: list[str] = []
+    keywords: list[str] = []
+
+    for tab in tabs:
+        url = tab.get("url", "")
+        title = tab.get("title", "") or ""
+
+        try:
+            netloc = urlparse(url).netloc.replace("www.", "")
+            if netloc and not netloc.startswith("chrome") and netloc not in domains:
+                domains.append(netloc)
+        except Exception:
+            pass
+
+        words = re.findall(r"[A-Za-z][A-Za-z0-9_\-]{2,}", title)
+        for w in words:
+            lw = w.lower()
+            if lw not in _STOP_WORDS and w not in keywords:
+                keywords.append(w)
+
+    return {
+        "domains": domains[:6],
+        "keywords": keywords[:10],
+    }
+
+
+# Each question has a distinct purpose so the 3 answers together give a full picture.
+_QUESTION_ANGLES = {
+    1: (
+        "GOAL: Identify the specific task or project the user is working on right now.",
+        "Ask which specific thing from their tabs they're focused on.",
+        "What are you focusing on with {term}?",
+        ["Starting fresh on it", "Resuming where I left off", "Just exploring / researching", "Other"],
+    ),
+    2: (
+        "GOAL: Understand the user's current state — are they making progress, stuck, or exploring?",
+        "Ask about their current momentum or blocker.",
+        "Where are you at with {term}?",
+        ["Making good progress", "Stuck on something specific", "Still figuring out the approach", "Other"],
+    ),
+    3: (
+        "GOAL: Clarify what 'done' looks like for this session — what do they want to ship or achieve?",
+        "Ask what they want to have completed by the end of this session.",
+        "What would feel like a win with {term} today?",
+        ["Ship / finish a feature", "Resolve a specific bug", "Understand how something works", "Other"],
+    ),
+}
+
+
+def _generate_question(tabs: list[dict], history: list[dict], index: int, prev_context: str = "") -> dict:
+    signals = _extract_tab_signals(tabs)
+    domains_str = ", ".join(signals["domains"]) if signals["domains"] else "unknown"
+    keywords_str = ", ".join(signals["keywords"]) if signals["keywords"] else "unknown"
+
+    covered = [f'- Q: {h["question"]} | A: {h["answer"]}' for h in history]
+    covered_str = "\n".join(covered) if covered else "None yet."
+
+    angle_goal, angle_hint, fallback_q_tmpl, fallback_opts = _QUESTION_ANGLES.get(index, _QUESTION_ANGLES[3])
+    fallback_term = signals["keywords"][0] if signals["keywords"] else (signals["domains"][0] if signals["domains"] else "your work")
+
+    system_prompt = (
+        "You are Momentum, a productivity check-in assistant.\n\n"
+        f"PREVIOUS SESSION CONTEXT (WHERE THEY LEFT OFF):\n{prev_context}\n\n"
+        f"CONTEXT FROM USER'S OPEN TABS:\n"
+        f"  Sites: {domains_str}\n"
+        f"  Key terms: {keywords_str}\n\n"
+        f"ALREADY ANSWERED (do not repeat these topics):\n{covered_str}\n\n"
+        f"YOUR TASK FOR QUESTION {index} OF 3:\n"
+        f"  {angle_goal}\n"
+        f"  {angle_hint}\n\n"
+        "RULES:\n"
+        "1. The question must reference a specific term from 'Key terms' or 'Sites'.\n"
+        "2. Max 12 words. No filler. Jump straight to the question.\n"
+        "3. Generate 3 specific options that reflect real possibilities given the tab context.\n"
+        "4. Always add \"Other\" as the final option.\n"
+        "5. Options must be concrete phrases (5–8 words), not single words.\n\n"
+        "EXAMPLE (tabs: github.com, keyword: FastAPI):\n"
+        "{\"question\": \"Where are you at with the FastAPI work?\", "
+        "\"options\": [\"Debugging a broken endpoint\", \"Adding a new route or feature\", \"Writing or fixing tests\", \"Other\"]}\n\n"
+        "Return ONLY the JSON object."
     )
-    
+
     try:
-        raw = _call_ollama(prompt, f"HISTORY OF QUESTIONS ALREADY ASKED AND ANSWERED:\n{hist_str}\n\nUSER'S OPEN TABS:\n{summary}")
-        return _parse_json(raw)
-    except:
+        raw = _call_llm(system_prompt, f"Generate question {index} of 3. (Memory: {prev_context[:50]}...)", response_schema=_SCHEMA_QUESTION)
+        result = _parse_json(raw)
+        if "question" in result and "options" in result and len(result["options"]) >= 3:
+            # Ensure "Other" is always the last option
+            opts = [o for o in result["options"] if o.lower() != "other"]
+            opts.append("Other")
+            result["options"] = opts
+            return result
+        raise ValueError("bad shape")
+    except Exception:
         return {
-            "question": f"Nice—{len(tabs)} tabs deep! What's the main goal?",
-            "options": ["Just starting", "Stuck on a bug", "Finishing up", "Taking a break"]
+            "question": fallback_q_tmpl.format(term=fallback_term),
+            "options": fallback_opts,
         }
 
 def _generate_final_insight(tabs: list[dict], history: list[dict]) -> dict:
@@ -232,9 +422,10 @@ def _generate_final_insight(tabs: list[dict], history: list[dict]) -> dict:
     )
     
     try:
-        raw = _call_ollama(prompt, f"TABS:\n{summary}\n\nHISTORY:\n{hist_str}")
+        raw = _call_llm(prompt, f"TABS:\n{summary}\n\nHISTORY:\n{hist_str}", response_schema=_SCHEMA_INSIGHT)
         return _parse_json(raw)
-    except:
+    except Exception as e:
+        print(f"_generate_final_insight error: {e}", file=sys.stderr)
         return {
             "working_on": "Could not determine.",
             "next_action": "Try reducing open tabs.",
@@ -253,11 +444,13 @@ def receive_tabs(payload: TabPayload):
 
     tabs_dump = [t.dict() for t in payload.tabs]
     
+    conn = _get_db()
+    prev = conn.execute("SELECT working_on FROM sessions WHERE is_draft = 0 ORDER BY id DESC LIMIT 1").fetchone()
+    prev_str = f"Prev session was: {prev['working_on']}" if prev and prev['working_on'] else "No previous session."
+
     # Generate initial focus score & Q1
     score_data = _generate_focus_score(tabs_dump)
-    q1_data = _generate_question(tabs_dump, [], 1)
-
-    conn = _get_db()
+    q1_data = _generate_question(tabs_dump, [], 1, prev_str)
     conn.execute(
         """
         INSERT INTO sessions (
@@ -345,8 +538,12 @@ def clarify_endpoint(payload: ClarifyPayload):
         conn.close()
         return {"status": "complete"}
     else:
+        # Fetch memory for context
+        prev_row = conn.execute("SELECT working_on FROM sessions WHERE is_draft = 0 ORDER BY id DESC LIMIT 1").fetchone()
+        prev_str = f"Previously working on: {prev_row['working_on']}" if prev_row and prev_row['working_on'] else ""
+
         # Generate Next Question
-        q_data = _generate_question(tabs, history, q_index)
+        q_data = _generate_question(tabs, history, q_index, prev_str)
         conn.execute(
             """
             UPDATE sessions 
@@ -366,85 +563,43 @@ def clarify_endpoint(payload: ClarifyPayload):
         return {"status": "clarifying"}
 
 
-@app.post("/chat")
-def chat_endpoint(payload: ChatPayload):
-    # Chat remains identical
-    context_str = "No open tabs."
-    try:
-        resp = httpx.get("http://localhost:9222/json", timeout=2.0)
-        if resp.status_code == 200:
-            tabs = [
-                t for t in resp.json()
-                if t.get("type") == "page" and not t.get("url", "").startswith("chrome")
-            ]
-            if tabs:
-                lines = [f"- {t.get('title', 'Unknown')} ({t.get('url', '')})" for t in tabs]
-                context_str = "\n".join(lines)
-    except Exception:
-        pass
-
+@app.post("/skip")
+def skip_endpoint(payload: SkipPayload):
     conn = _get_db()
-    row = conn.execute("SELECT memory_summary FROM sessions WHERE is_draft=0 ORDER BY id DESC LIMIT 1").fetchone()
-    conn.close()
-    memory = row["memory_summary"] if row else "No previous sessions."
+    row = conn.execute("SELECT * FROM sessions WHERE id = ?", (payload.session_id,)).fetchone()
+    if not row or not row["is_draft"]:
+        conn.close()
+        raise HTTPException(400, "Invalid session or not a draft.")
 
-    system_prompt = (
-        "You are Momentum, a proactive productivity coach like Claude. "
-        "Keep your answers brief, friendly, and highly actionable.\n\n"
-        f"LAST SESSION MEMORY:\n{memory}\n\n"
-        f"CURRENT OPEN TABS:\n{context_str}\n\n"
-        "INSTRUCTIONS:\n"
-        "1. Ask a sharp question to understand what they need to do next, before giving long advice.\n"
-        "2. Help them focus their intent for the upcoming session."
+    history = json.loads(row["history_json"])
+    tabs = json.loads(row["raw_tabs_json"])
+
+    insight = _generate_final_insight(tabs, history)
+    sup_tasks = insight.get("supporting_tasks", [])
+    for t in sup_tasks:
+        if "done" not in t:
+            t["done"] = False
+
+    conn.execute(
+        """
+        UPDATE sessions
+        SET working_on = ?, next_action = ?, stuck_signal = ?, memory_summary = ?,
+            history_json = ?, is_draft = 0, supporting_tasks = ?
+        WHERE id = ?
+        """,
+        (
+            insight.get("working_on"),
+            insight.get("next_action"),
+            insight.get("stuck_signal"),
+            insight.get("memory_summary"),
+            json.dumps(history),
+            json.dumps(sup_tasks),
+            payload.session_id,
+        ),
     )
-
-    messages = [{"role": "system", "content": system_prompt}]
-    
-    user_msgs = payload.messages
-    if not user_msgs:
-        user_msgs = [ChatMessage(role="user", content="I just opened the chat. What should I focus on?")]
-        
-    for m in user_msgs:
-        messages.append({"role": m.role, "content": m.content})
-
-    if not GEMINI_API_KEY:
-        try:
-            resp = httpx.post(
-                f"{OLLAMA_BASE_URL}/v1/chat/completions",
-                json={"model": OLLAMA_MODEL, "messages": messages, "stream": False},
-                timeout=120.0,
-            )
-            resp.raise_for_status()
-            return {"reply": resp.json()["choices"][0]["message"]["content"]}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-            
-    contents = []
-    for m in user_msgs:
-        role = "model" if m.role == "ai" else "user"
-        contents.append({"role": role, "parts": [{"text": m.content}]})
-
-    gemini_payload = {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": contents,
-        "tools": [{"googleSearch": {}}]
-    }
-
-    try:
-        resp = httpx.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}",
-            json=gemini_payload,
-            timeout=120.0,
-        )
-        resp.raise_for_status()
-        reply_data = resp.json()
-        try:
-            reply_text = reply_data["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError):
-            reply_text = "Sorry, I received an invalid response from Gemini."
-        return {"reply": reply_text}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    conn.commit()
+    conn.close()
+    return {"status": "complete"}
 
 
 @app.get("/focus")

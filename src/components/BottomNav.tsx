@@ -1,10 +1,8 @@
-import { Home, BarChart3, MessageCircle, Clock } from "lucide-react";
+import { Home, Clock } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 const tabs = [
   { path: "/", icon: Home, label: "Today" },
-  { path: "/history", icon: BarChart3, label: "Focus" },
-  { path: "/chat", icon: MessageCircle, label: "Ask" },
   { path: "/sessions", icon: Clock, label: "Log" },
 ];
 

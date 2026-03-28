@@ -59,7 +59,7 @@ const SecondaryTasks = ({
               onCheckedChange={(checked) => onToggle(t.index, !!checked)}
               className="border-primary/40 data-[state=checked]:bg-primary data-[state=checked]:border-primary w-5 h-5 rounded-md"
             />
-            <span className={`text-[13px] flex-1 truncate font-medium ${t.done ? "line-through text-muted-foreground" : "text-foreground"}`}>
+            <span className={`text-[13px] flex-1 font-medium ${t.done ? "line-through text-muted-foreground" : "text-foreground"}`}>
               {t.task}
             </span>
             <span className={`text-[9px] uppercase tracking-wider px-2.5 py-1 rounded-full font-bold shrink-0 flex items-center gap-1 ${pillStyles[t.energy] || "bg-secondary text-primary"}`}>

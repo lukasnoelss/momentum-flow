@@ -1,12 +1,26 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Flame, Send, Wifi, WifiOff, RefreshCw, Sun, Coffee, Moon, Rocket } from "lucide-react";
+import { Flame, Wifi, WifiOff, RefreshCw, Sun, Coffee, Moon, Rocket } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import FocusScore from "@/components/FocusScore";
 import ContextBar from "@/components/ContextBar";
 import FeaturedTask from "@/components/FeaturedTask";
 import SecondaryTasks from "@/components/SecondaryTasks";
-import { useFocus, useMemory, useSessions, useScan, useClarify, useToggleTask, focusLabel } from "@/hooks/useApi";
+import { useFocus, useMemory, useSessions, useScan, useClarify, useSkip, useToggleTask, focusLabel, scoreColor } from "@/hooks/useApi";
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, ReferenceLine, ReferenceArea,
+} from "recharts";
+
+const ChartTooltip = ({ active, payload }: any) => {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="bg-card border border-border rounded-xl px-3 py-2 text-xs shadow-lg">
+      <p className="font-bold text-foreground">{d.time} — {d.score}</p>
+      <p className="text-muted-foreground mt-0.5 line-clamp-2">{d.label}</p>
+    </div>
+  );
+};
 
 const greetingData = () => {
   const h = new Date().getHours();
@@ -42,8 +56,8 @@ const useLiveScore = (baseScore: number | null) => {
 };
 
 const Index = () => {
-  const [input, setInput] = useState("");
-  const navigate = useNavigate();
+  const [otherInput, setOtherInput] = useState("");
+  const [showOtherInput, setShowOtherInput] = useState(false);
   const { text: greetText, icon: GreetIcon } = greetingData();
 
   const { data: focus, isError: focusError, isLoading: focusLoading } = useFocus();
@@ -51,6 +65,13 @@ const Index = () => {
   const { data: sessionsData } = useSessions();
   const scanMutation = useScan();
   const clarifyMutation = useClarify();
+  const skipMutation = useSkip();
+
+  // Reset "Other" input state when question changes
+  useEffect(() => {
+    setOtherInput("");
+    setShowOtherInput(false);
+  }, [focus?.question_count]);
 
   const sessions = sessionsData?.sessions ?? [];
   const latest = sessions[0] ?? null;
@@ -66,12 +87,6 @@ const Index = () => {
   const handleToggleTask = (taskIndex: number, done: boolean) => {
     if (!latest) return;
     toggleTaskMutation.mutate({ session_id: focus?.session_id || 0, task_index: taskIndex, done });
-  };
-
-  const handleAsk = () => {
-    if (!input.trim()) return;
-    navigate("/chat");
-    setInput("");
   };
 
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
@@ -147,21 +162,59 @@ const Index = () => {
           <div className="rounded-3xl p-8 w-full">
             <h2 className="text-xl md:text-2xl font-display text-foreground mb-8">{focus.question}</h2>
             <div className="flex flex-col gap-3">
-              {focus.options?.map((opt: string, i: number) => (
-                <button key={i} onClick={() => clarifyMutation.mutate({ session_id: focus.session_id!, answer: opt })} disabled={clarifyMutation.isPending} className="bg-primary/8 hover:bg-primary/15 border border-primary/15 text-foreground px-5 py-4 rounded-xl text-left font-medium disabled:opacity-50 transition-all">
-                  {opt}
-                </button>
-              ))}
+              {focus.options?.map((opt: string, i: number) => {
+                if (opt === "Other") {
+                  return showOtherInput ? (
+                    <div key={i} className="flex gap-2">
+                      <input
+                        autoFocus
+                        value={otherInput}
+                        onChange={(e) => setOtherInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && otherInput.trim()) {
+                            clarifyMutation.mutate({ session_id: focus.session_id!, answer: otherInput.trim() });
+                          }
+                        }}
+                        placeholder="Describe what you're doing…"
+                        className="flex-1 bg-primary/8 border border-primary/30 text-foreground px-4 py-3 rounded-xl text-sm outline-none placeholder:text-muted-foreground"
+                      />
+                      <button
+                        onClick={() => otherInput.trim() && clarifyMutation.mutate({ session_id: focus.session_id!, answer: otherInput.trim() })}
+                        disabled={!otherInput.trim() || clarifyMutation.isPending}
+                        className="px-4 py-3 rounded-xl bg-primary text-primary-foreground font-bold disabled:opacity-40 transition-all"
+                      >
+                        →
+                      </button>
+                    </div>
+                  ) : (
+                    <button key={i} onClick={() => setShowOtherInput(true)} disabled={clarifyMutation.isPending} className="bg-primary/8 hover:bg-primary/15 border border-primary/15 text-foreground px-5 py-4 rounded-xl text-left font-medium disabled:opacity-50 transition-all">
+                      Other…
+                    </button>
+                  );
+                }
+                return (
+                  <button key={i} onClick={() => clarifyMutation.mutate({ session_id: focus.session_id!, answer: opt })} disabled={clarifyMutation.isPending} className="bg-primary/8 hover:bg-primary/15 border border-primary/15 text-foreground px-5 py-4 rounded-xl text-left font-medium disabled:opacity-50 transition-all">
+                    {opt}
+                  </button>
+                );
+              })}
             </div>
             {clarifyMutation.isPending && <p className="text-xs text-muted-foreground mt-4 animate-pulse">Thinking…</p>}
+            <button
+              onClick={() => skipMutation.mutate({ session_id: focus.session_id! })}
+              disabled={skipMutation.isPending || clarifyMutation.isPending}
+              className="mt-6 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
+            >
+              {skipMutation.isPending ? "Generating…" : "Skip questions →"}
+            </button>
           </div>
         </div>
       ) : (
         <>
           {/* Dashboard grid */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-8 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-8 mb-8 md:items-stretch">
             {/* Left — Focus Score + AI Memory */}
-            <div className="md:col-span-5 space-y-6">
+            <div className="md:col-span-4 space-y-6">
               <div className="rounded-2xl p-6">
                 {focusLoading ? (
                   <div className="flex flex-col items-center justify-center h-48 text-muted-foreground text-sm animate-pulse">Waiting for first scan…</div>
@@ -178,18 +231,16 @@ const Index = () => {
               <ContextBar message={memoryText} />
             </div>
 
-            {/* Right — Tasks */}
-            <div className="md:col-span-7 space-y-6">
+            {/* Middle — Tasks */}
+            <div className="md:col-span-5 space-y-6">
               {latest ? (
                 <FeaturedTask workingOn={latest.working_on} nextAction={latest.next_action} stuckSignal={latest.stuck_signal} />
               ) : (
                 <div className="relative rounded-2xl border border-primary/15 p-8 text-center overflow-hidden group hover:border-primary/30 transition-all"
                   style={{ background: 'linear-gradient(135deg, rgba(108,93,211,0.06) 0%, rgba(108,93,211,0.02) 50%, rgba(22,162,118,0.04) 100%)' }}>
-                  {/* Decorative floating dots */}
                   <div className="absolute top-4 right-6 w-2 h-2 rounded-full bg-primary/20 animate-bounce" style={{ animationDuration: '3s' }} />
                   <div className="absolute top-8 right-12 w-1.5 h-1.5 rounded-full bg-score-high/25 animate-bounce" style={{ animationDuration: '4s', animationDelay: '1s' }} />
                   <div className="absolute bottom-6 left-8 w-1.5 h-1.5 rounded-full bg-score-mid/25 animate-bounce" style={{ animationDuration: '3.5s', animationDelay: '0.5s' }} />
-                  
                   <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
                     <Rocket className="w-7 h-7 text-primary" />
                   </div>
@@ -209,21 +260,94 @@ const Index = () => {
               )}
               <SecondaryTasks tasks={secondaryTasks} onToggle={handleToggleTask} />
             </div>
+
+            {/* Right — Session log */}
+            <div className="md:col-span-3 flex flex-col min-h-0">
+              <p className="text-[10px] text-muted-foreground font-bold tracking-[0.2em] uppercase mb-3">Session log</p>
+              {sessions.length === 0 ? (
+                <p className="text-muted-foreground text-xs">No sessions yet.</p>
+              ) : (
+                <div className="flex-1 overflow-y-auto space-y-2 min-h-0 pr-1">
+                  {sessions.map((s, i) => {
+                    const color = scoreColor(s.focus_score);
+                    const pillCls = color === "high"
+                      ? "bg-emerald-500/15 text-emerald-600 border border-emerald-500/20"
+                      : color === "mid"
+                      ? "bg-amber-500/15 text-amber-600 border border-amber-500/20"
+                      : "bg-rose-500/15 text-rose-600 border border-rose-500/20";
+                    return (
+                      <div
+                        key={i}
+                        className="rounded-xl px-3 py-3 flex items-start gap-2 bg-card border border-border/60 hover:border-primary/20 hover:shadow-sm transition-all animate-fade-in"
+                        style={{ animationDelay: `${i * 40}ms`, animationFillMode: "both" }}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-bold text-foreground truncate">{s.working_on}</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            {new Date(s.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · {new Date(s.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </div>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${pillCls}`}>{s.focus_score}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Ask bar */}
-          <div className="flex items-center gap-3 bg-card/80 backdrop-blur-xl rounded-2xl px-6 py-4 border border-border/50 shadow-[inset_0_2px_4px_rgba(0,0,0,0.04),0_8px_32px_-8px_rgba(108,93,211,0.12)]">
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleAsk()}
-              placeholder="Ask Momentum anything…"
-              className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none font-medium"
-            />
-            <button onClick={handleAsk} className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center text-primary-foreground hover:bg-primary/90 transition-all shadow-lg shadow-primary/30">
-              <Send className="w-4 h-4" />
-            </button>
-          </div>
+          {/* Focus graph */}
+          {sessions.length > 0 && (() => {
+            const chartData = [...sessions].reverse().map((s) => ({
+              time: new Date(s.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+              score: s.focus_score,
+              label: s.working_on,
+            }));
+            const scores = sessions.map((s) => s.focus_score);
+            const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+            const peak = sessions.reduce((best, s) => s.focus_score > (best?.focus_score ?? -1) ? s : best, null as (typeof sessions)[0] | null);
+            const peakTime = peak ? new Date(peak.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+            return (
+              <div className="mb-8">
+                <p className="text-[10px] text-muted-foreground font-bold tracking-[0.2em] uppercase mb-3">Focus today</p>
+                <div className="rounded-2xl p-4 bg-gradient-to-br from-primary/[0.05] to-transparent card-glow">
+                  <ResponsiveContainer width="100%" height={160}>
+                    <AreaChart data={chartData} margin={{ top: 5, right: 5, bottom: 0, left: -20 }}>
+                      <defs>
+                        <linearGradient id="scoreGradToday" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#6C5DD3" stopOpacity={0.3} />
+                          <stop offset="100%" stopColor="#6C5DD3" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <ReferenceArea y1={70} y2={100} fill="#16A276" fillOpacity={0.06} />
+                      <ReferenceArea y1={40} y2={70} fill="#EFA327" fillOpacity={0.06} />
+                      <ReferenceArea y1={0} y2={40} fill="#D65D3C" fillOpacity={0.06} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(230 12% 90%)" />
+                      <XAxis dataKey="time" tick={{ fontSize: 9 }} stroke="hsl(230 8% 46%)" />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 9 }} stroke="hsl(230 8% 46%)" />
+                      <Tooltip content={<ChartTooltip />} />
+                      <ReferenceLine y={70} stroke="#16A276" strokeDasharray="3 3" strokeOpacity={0.4} />
+                      <ReferenceLine y={40} stroke="#EFA327" strokeDasharray="3 3" strokeOpacity={0.4} />
+                      <Area type="monotone" dataKey="score" stroke="#6C5DD3" strokeWidth={2.5} fill="url(#scoreGradToday)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="grid grid-cols-3 gap-2.5 mt-3">
+                  {[
+                    { label: "Avg focus", value: `${avg}` },
+                    { label: "Sessions", value: `${sessions.length}` },
+                    { label: "Peak time", value: peakTime },
+                  ].map((s) => (
+                    <div key={s.label} className="bg-gradient-to-br from-primary/[0.06] to-transparent rounded-2xl p-4 text-center card-glow">
+                      <p className="text-2xl font-display text-foreground">{s.value}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1 tracking-wide uppercase font-bold">{s.label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
         </>
       )}
     </AppShell>

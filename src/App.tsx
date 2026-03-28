@@ -5,7 +5,6 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Index from "./pages/Index";
 import FocusHistory from "./pages/FocusHistory";
-import Chat from "./pages/Chat";
 import SessionLog from "./pages/SessionLog";
 import NotFound from "./pages/NotFound";
 
@@ -20,7 +19,6 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/history" element={<FocusHistory />} />
-          <Route path="/chat" element={<Chat />} />
           <Route path="/sessions" element={<SessionLog />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

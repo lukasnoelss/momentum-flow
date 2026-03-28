@@ -23,6 +23,7 @@ BACKEND_URL = "http://localhost:8000/tabs"
 SCAN_INTERVAL = 15  # seconds
 
 SKIP_SCHEMES = ("chrome://", "devtools://", "chrome-extension://", "extension://")
+SKIP_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0")
 
 
 def get_open_tabs() -> list[dict]:
@@ -76,14 +77,18 @@ def extract_tab_content(ws_url: str) -> dict | None:
 def build_payload(tabs_json: list[dict]) -> list[dict]:
     """Build the tab payload to send to the backend."""
     payload: list[dict] = []
+    
+    # Cap to 15 tabs to avoid massive hangs during extraction
+    tabs_to_scan = [t for t in tabs_json if t.get("type") == "page"][:15]
+    total = len(tabs_to_scan)
 
-    for tab in tabs_json:
-        if tab.get("type") != "page":
-            continue
-
+    for i, tab in enumerate(tabs_to_scan, 1):
         url: str = tab.get("url", "")
         if any(url.startswith(s) for s in SKIP_SCHEMES):
             continue
+        
+        # Log progress so user sees it moving
+        print(f"   [{i}/{total}] Reading: {tab.get('title', '...')[:40]}")
 
         ws_url = tab.get("webSocketDebuggerUrl")
         content = extract_tab_content(ws_url) if ws_url else None

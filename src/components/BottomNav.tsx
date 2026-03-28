@@ -13,23 +13,26 @@ const BottomNav = () => {
   const navigate = useNavigate();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-card/80 backdrop-blur-lg border-t border-border z-50">
-      <div className="max-w-[420px] mx-auto flex">
-        {tabs.map(({ path, icon: Icon, label }) => {
-          const active = pathname === path;
-          return (
-            <button
-              key={path}
-              onClick={() => navigate(path)}
-              className={`flex-1 flex flex-col items-center gap-1 py-3 text-xs transition-colors ${
-                active ? "text-primary" : "text-muted-foreground"
-              }`}
-            >
-              <Icon className="w-5 h-5" />
-              {label}
-            </button>
-          );
-        })}
+    <nav className="fixed top-0 left-0 right-0 bg-card/80 backdrop-blur-lg border-b border-border z-50">
+      <div className="max-w-3xl mx-auto px-6 md:px-10 flex items-center justify-between h-14">
+        <span className="text-lg font-display text-foreground tracking-tight">Momentum</span>
+        <div className="flex gap-1">
+          {tabs.map(({ path, icon: Icon, label }) => {
+            const active = pathname === path;
+            return (
+              <button
+                key={path}
+                onClick={() => navigate(path)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  active ? "bg-secondary text-primary" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                <span className="hidden sm:inline">{label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </nav>
   );

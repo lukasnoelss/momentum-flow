@@ -3,7 +3,7 @@ import BottomNav from "./BottomNav";
 
 const AppShell = ({ children }: { children: ReactNode }) => (
   <div className="min-h-screen bg-background">
-    <div className="max-w-[420px] mx-auto px-5 pb-24 pt-6">
+    <div className="max-w-3xl mx-auto px-6 md:px-10 pb-24 pt-8 md:pt-12">
       {children}
     </div>
     <BottomNav />

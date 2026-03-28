@@ -36,10 +36,10 @@ const FocusScore = ({ score, label }: FocusScoreProps) => {
   const offset = circumference - (score / 100) * circumference;
 
   return (
-    <div className="flex flex-col items-center gap-5 py-8">
-      <div className="relative flex items-center justify-center w-52 h-52">
+    <div className="flex flex-col items-center gap-4 py-6">
+      <div className="relative flex items-center justify-center w-40 h-40">
         {/* Deep aura */}
-        <div className={`absolute inset-[-30px] rounded-full ${c.glow} orb-aura`} />
+        <div className={`absolute inset-[-20px] rounded-full ${c.glow} orb-aura`} />
 
         {/* Spinning gradient ring */}
         <div className="absolute inset-[-4px] rounded-full orb-ring-spin"
@@ -70,7 +70,7 @@ const FocusScore = ({ score, label }: FocusScoreProps) => {
 
         {/* Score number */}
         <span
-          className={`text-7xl ${c.text} relative z-10 drop-shadow-lg`}
+          className={`text-6xl ${c.text} relative z-10 drop-shadow-lg`}
           style={{ fontFamily: 'Inter, system-ui', fontWeight: 200, letterSpacing: '-0.04em' }}
         >
           {score}

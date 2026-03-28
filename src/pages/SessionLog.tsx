@@ -18,48 +18,31 @@ const SessionLog = () => {
 
   return (
     <AppShell>
-      <h1 className="text-2xl font-display text-foreground mb-6">Session log</h1>
+      <h1 className="text-xl font-display text-foreground mb-5">Session log</h1>
 
-      {isLoading && (
-        <p className="text-muted-foreground text-sm animate-pulse">Loading sessions…</p>
-      )}
-
-      {isError && (
-        <p className="text-score-low text-sm">
-          Could not reach backend. Make sure the server is running on port 8000.
-        </p>
-      )}
-
+      {isLoading && <p className="text-muted-foreground text-xs animate-pulse">Loading…</p>}
+      {isError && <p className="text-score-low text-xs">Could not reach backend.</p>}
       {!isLoading && !isError && sessions.length === 0 && (
-        <p className="text-muted-foreground text-sm">
-          No sessions yet — run <code className="font-mono text-xs bg-secondary px-1 py-0.5 rounded">python tab_reader.py</code> to start tracking.
-        </p>
+        <p className="text-muted-foreground text-xs">No sessions yet.</p>
       )}
 
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {sessions.map((s, i) => (
           <div
             key={i}
-            className="bg-card rounded-xl border border-border px-4 py-4 flex items-start gap-4 animate-fade-in"
-            style={{ animationDelay: `${i * 80}ms`, animationFillMode: "both" }}
+            className="rounded-2xl px-4 py-3.5 flex items-start gap-3 animate-fade-in bg-primary/[0.02]"
+            style={{ animationDelay: `${i * 60}ms`, animationFillMode: "both" }}
           >
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{s.working_on}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-[13px] font-medium text-foreground truncate">{s.working_on}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
                 {formatDate(s.timestamp)} · {s.focus_label}
               </p>
               {s.next_action && (
-                <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
-                  → {s.next_action}
-                </p>
-              )}
-              {s.stuck_signal && (
-                <p className="text-xs text-score-mid mt-1 line-clamp-1">⚠ {s.stuck_signal}</p>
+                <p className="text-[10px] text-muted-foreground mt-1 line-clamp-1">→ {s.next_action}</p>
               )}
             </div>
-            <span
-              className={`text-xs font-semibold px-2.5 py-1 rounded-full shrink-0 ${pillColor[scoreColor(s.focus_score)]}`}
-            >
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${pillColor[scoreColor(s.focus_score)]}`}>
               {s.focus_score}
             </span>
           </div>

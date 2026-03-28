@@ -178,8 +178,28 @@ const Index = () => {
               {latest ? (
                 <FeaturedTask workingOn={latest.working_on} nextAction={latest.next_action} stuckSignal={latest.stuck_signal} />
               ) : (
-                <div className="rounded-2xl border-2 border-dashed border-primary/20 p-6 text-center">
-                  <p className="text-sm text-muted-foreground">No sessions yet — run the tab reader to start tracking your focus.</p>
+                <div className="relative rounded-2xl border border-primary/15 p-8 text-center overflow-hidden group hover:border-primary/30 transition-all"
+                  style={{ background: 'linear-gradient(135deg, rgba(108,93,211,0.06) 0%, rgba(108,93,211,0.02) 50%, rgba(22,162,118,0.04) 100%)' }}>
+                  {/* Decorative floating dots */}
+                  <div className="absolute top-4 right-6 w-2 h-2 rounded-full bg-primary/20 animate-bounce" style={{ animationDuration: '3s' }} />
+                  <div className="absolute top-8 right-12 w-1.5 h-1.5 rounded-full bg-score-high/25 animate-bounce" style={{ animationDuration: '4s', animationDelay: '1s' }} />
+                  <div className="absolute bottom-6 left-8 w-1.5 h-1.5 rounded-full bg-score-mid/25 animate-bounce" style={{ animationDuration: '3.5s', animationDelay: '0.5s' }} />
+                  
+                  <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                    <Rocket className="w-7 h-7 text-primary" />
+                  </div>
+                  <h3 className="text-base font-bold text-foreground mb-1.5">Ready to track your focus</h3>
+                  <p className="text-sm text-muted-foreground mb-5 max-w-xs mx-auto">
+                    Run the tab reader to start analysing your workflow and get personalised task suggestions.
+                  </p>
+                  <button
+                    onClick={() => scanMutation.mutate()}
+                    disabled={scanMutation.isPending}
+                    className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-primary/90 shadow-lg shadow-primary/25 transition-all disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${scanMutation.isPending ? 'animate-spin' : ''}`} />
+                    {scanMutation.isPending ? 'Scanning…' : 'Start first scan'}
+                  </button>
                 </div>
               )}
               <SecondaryTasks tasks={secondaryTasks} onToggle={handleToggleTask} />

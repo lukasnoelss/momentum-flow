@@ -1,4 +1,4 @@
-import { scoreColor } from "@/data/mockData";
+import { scoreColor } from "@/hooks/useApi";
 
 interface FocusScoreProps {
   score: number;

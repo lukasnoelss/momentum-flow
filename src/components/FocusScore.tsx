@@ -16,18 +16,18 @@ const FocusScore = ({ score, label }: FocusScoreProps) => {
   const classes = colorClasses[level];
 
   return (
-    <div className="flex flex-col items-center gap-3 py-6">
-      <div className={`relative flex items-center justify-center`}>
-        {/* Breathing ring */}
+    <div className="flex flex-col items-center gap-4 py-10">
+      <div className="relative flex items-center justify-center">
+        {/* Breathing glow ring */}
         <div
-          className={`absolute w-36 h-36 rounded-full border-2 ${classes.ring} ${classes.glow} animate-breathe`}
+          className={`absolute w-44 h-44 rounded-full border ${classes.ring} ${classes.glow} animate-breathe blur-[2px]`}
         />
-        {/* Score */}
-        <span className={`text-6xl font-light tracking-tight ${classes.text} relative z-10`}>
+        {/* Score number — massive & elegant */}
+        <span className={`text-8xl font-light tracking-tighter ${classes.text} relative z-10`} style={{ fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 200 }}>
           {score}
         </span>
       </div>
-      <p className="text-sm text-muted-foreground font-medium tracking-wide uppercase">
+      <p className="text-[11px] text-muted-foreground font-medium tracking-[0.2em] uppercase">
         {label}
       </p>
     </div>

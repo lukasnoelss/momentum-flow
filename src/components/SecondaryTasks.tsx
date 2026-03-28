@@ -3,6 +3,7 @@ import { SessionTask } from "@/hooks/useApi";
 
 export interface TaskItem extends SessionTask {
   index: number;
+  done?: boolean;
 }
 
 const pillColor = {
@@ -20,9 +21,9 @@ const SecondaryTasks = ({
 }) => {
   if (tasks.length === 0) {
     return (
-      <div className="bg-card rounded-lg border border-border px-4 py-5 text-center">
-        <p className="text-sm text-muted-foreground">
-          No secondary tasks auto-generated for this session.
+      <div className="bg-primary/[0.02] rounded-2xl px-4 py-5 text-center">
+        <p className="text-xs text-muted-foreground">
+          No secondary tasks for this session yet.
         </p>
       </div>
     );
@@ -33,28 +34,28 @@ const SecondaryTasks = ({
       {tasks.map((t) => (
         <div
           key={t.index}
-          className={`flex items-center gap-3 bg-card rounded-lg px-4 py-3 border border-border transition-all duration-200 ${
+          className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200 bg-foreground/[0.02] ${
             t.done ? "opacity-50" : ""
           }`}
         >
           <Checkbox
-            checked={t.done}
+            checked={!!t.done}
             onCheckedChange={(checked) => onToggle(t.index, !!checked)}
-            className="border-muted-foreground/40"
+            className="border-muted-foreground/30"
           />
           <span
-            className={`text-sm flex-1 truncate ${
+            className={`text-[13px] flex-1 truncate ${
               t.done ? "line-through text-muted-foreground" : "text-foreground"
             }`}
           >
             {t.task}
           </span>
           <span
-            className={`text-[10px] uppercase tracking-wider px-2.5 py-0.5 rounded-full font-bold shrink-0 ${
+            className={`text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold shrink-0 ${
               pillColor[t.energy] || "bg-secondary text-primary"
             }`}
           >
-            {t.energy} energy
+            {t.energy}
           </span>
         </div>
       ))}

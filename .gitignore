@@ -22,3 +22,20 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment files
+.env
+*.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+momentum.db
+
+# Python
+__pycache__
+*.pyc
+.venv
+venv
+ENV

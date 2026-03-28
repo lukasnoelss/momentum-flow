@@ -10,12 +10,17 @@ import sqlite3
 import sys
 import subprocess
 import datetime
+import os
 from typing import Optional
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+load_dotenv()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # ── CONFIG ─────────────────────────────────────────────────────────
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -48,12 +53,19 @@ def _init_db() -> None:
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp   TEXT NOT NULL,
             tab_count   INTEGER NOT NULL,
-            focus_score INTEGER NOT NULL,
-            focus_label TEXT NOT NULL,
-            working_on  TEXT NOT NULL,
-            next_action TEXT NOT NULL,
+            focus_score INTEGER,
+            focus_label TEXT,
+            working_on  TEXT,
+            next_action TEXT,
             stuck_signal TEXT,
-            memory_summary TEXT NOT NULL
+            memory_summary TEXT,
+            raw_tabs_json TEXT,
+            history_json TEXT DEFAULT '[]',
+            current_question TEXT,
+            current_options TEXT,
+            question_count INTEGER DEFAULT 1,
+            is_draft BOOLEAN DEFAULT 1,
+            supporting_tasks TEXT DEFAULT '[]'
         )
     """)
     conn.commit()
@@ -75,68 +87,73 @@ class Tab(BaseModel):
 class TabPayload(BaseModel):
     tabs: list[Tab]
 
+class ClarifyPayload(BaseModel):
+    session_id: int
+    answer: str
+
+class TaskTogglePayload(BaseModel):
+    session_id: int
+    task_index: int
+    done: bool
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatPayload(BaseModel):
+    messages: list[ChatMessage]
+
+@app.post("/tasks/toggle")
+def toggle_task(payload: TaskTogglePayload):
+    conn = _get_db()
+    row = conn.execute("SELECT supporting_tasks FROM sessions WHERE id = ?", (payload.session_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Session not found")
+        
+    tasks = json.loads(row["supporting_tasks"])
+    if payload.task_index < 0 or payload.task_index >= len(tasks):
+        conn.close()
+        raise HTTPException(status_code=400, detail="Invalid task index")
+        
+    tasks[payload.task_index]["done"] = payload.done
+    conn.execute("UPDATE sessions SET supporting_tasks = ? WHERE id = ?", (json.dumps(tasks), payload.session_id))
+    conn.commit()
+    conn.close()
+    return {"success": True}
+
 # ── OLLAMA HELPERS ─────────────────────────────────────────────────
 
-SYSTEM_PROMPT = (
-    "You are Momentum, a productivity AI. Analyse the user's open tabs "
-    "and return a JSON object with exactly these keys:\n\n"
-    "- focus_score: integer 0-100. Score how focused the user is right "
-    "now. 100 = one task, deep in it. 0 = chaotic tab sprawl with no "
-    "clear thread. Base this on: number of tabs, how related they are "
-    "to each other, presence of distraction sites (social media, news, "
-    "video), and whether there is a clear primary task visible.\n"
-    "- focus_label: one of exactly three strings: 'Deep focus', "
-    "'Getting scattered', or 'Highly fragmented'\n"
-    "- working_on: one sentence, what the user is most likely focused "
-    "on, specific, references actual tab titles\n"
-    "- next_action: one hyper-specific next step, include file names "
-    "or URLs where relevant\n"
-    "- stuck_signal: one sentence or null — whether tabs suggest the "
-    "user is stuck or procrastinating\n"
-    "- memory_summary: one short paragraph in second person summarising "
-    "this session as useful context for next time\n\n"
-    "Respond with valid JSON only. No markdown. No extra keys.\n"
-    "Start your response with { and end with }."
-)
-
-RETRY_SYSTEM_PROMPT = (
-    "You MUST respond with ONLY a JSON object. No markdown, no explanation. "
-    "The JSON must have exactly these keys: focus_score (int 0-100), "
-    "focus_label (string: 'Deep focus' | 'Getting scattered' | 'Highly fragmented'), "
-    "working_on (string), next_action (string), stuck_signal (string or null), "
-    "memory_summary (string). Start with { end with }. Nothing else."
-)
-
-
-def _build_tab_summary(tabs: list[Tab]) -> str:
+def _build_tab_summary(tabs: list[dict]) -> str:
     lines: list[str] = []
     for i, tab in enumerate(tabs, 1):
-        snippet = (tab.text or "")[:500]
-        lines.append(f"Tab {i}: {tab.title}\n  URL: {tab.url}\n  Text: {snippet}\n")
+        snippet = (tab.get("text") or "")[:500]
+        lines.append(f"Tab {i}: {tab.get('title')}\n  URL: {tab.get('url')}\n  Text: {snippet}\n")
     return "\n".join(lines)
 
 
 def _call_ollama(system: str, user: str) -> str:
     """Call Ollama's OpenAI-compatible chat endpoint synchronously."""
-    resp = httpx.post(
-        f"{OLLAMA_BASE_URL}/v1/chat/completions",
-        json={
-            "model": OLLAMA_MODEL,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "stream": False,
-        },
-        timeout=120.0,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["choices"][0]["message"]["content"]
+    try:
+        resp = httpx.post(
+            f"{OLLAMA_BASE_URL}/v1/chat/completions",
+            json={
+                "model": OLLAMA_MODEL,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "stream": False,
+            },
+            timeout=180.0,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"Ollama Error: {e}", file=sys.stderr)
+        raise
 
-
-def _parse_insight(raw: str) -> dict:
-    """Try to parse JSON from Gemma's response, stripping markdown fences if present."""
+def _parse_json(raw: str) -> dict:
     text = raw.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
@@ -148,57 +165,82 @@ def _parse_insight(raw: str) -> dict:
         text = text[first_brace : last_brace + 1]
     return json.loads(text)
 
-
-FALLBACK_INSIGHT = {
-    "focus_score": 50,
-    "focus_label": "Getting scattered",
-    "working_on": "Could not determine — Gemma returned invalid JSON.",
-    "next_action": "Try reducing open tabs and re-run the scan.",
-    "stuck_signal": None,
-    "memory_summary": "The AI was unable to parse this session. You may want to retry.",
-}
-
-
-def _get_insight(tabs: list[Tab]) -> dict:
+def _generate_focus_score(tabs: list[dict]) -> dict:
     summary = _build_tab_summary(tabs)
-
-    # First attempt
-    try:
-        raw = _call_ollama(SYSTEM_PROMPT, summary)
-        return _parse_insight(raw)
-    except Exception:
-        pass
-
-    # Retry with stricter prompt
-    try:
-        raw = _call_ollama(RETRY_SYSTEM_PROMPT, summary)
-        return _parse_insight(raw)
-    except Exception:
-        return FALLBACK_INSIGHT.copy()
-
-
-def _store_session(insight: dict, tab_count: int) -> None:
-    conn = _get_db()
-    conn.execute(
-        """
-        INSERT INTO sessions
-            (timestamp, tab_count, focus_score, focus_label,
-             working_on, next_action, stuck_signal, memory_summary)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            datetime.datetime.utcnow().isoformat(),
-            tab_count,
-            insight["focus_score"],
-            insight["focus_label"],
-            insight["working_on"],
-            insight["next_action"],
-            insight.get("stuck_signal"),
-            insight["memory_summary"],
-        ),
+    prompt = (
+        "You are Momentum, a productivity AI. Analyse the user's open tabs and return ONLY a JSON object with:\n"
+        "- focus_score: integer 0-100.\n"
+        "- focus_label: 'Deep focus', 'Getting scattered', or 'Highly fragmented'.\n\n"
+        "Respond with valid JSON only. Start with { and end with }."
     )
-    conn.commit()
-    conn.close()
+    
+    try:
+        raw = _call_ollama(prompt, summary)
+        return _parse_json(raw)
+    except:
+        return {"focus_score": 50, "focus_label": "Getting scattered"}
+
+def _generate_question(tabs: list[dict], history: list[dict], index: int) -> dict:
+    summary = _build_tab_summary(tabs)
+    
+    # Cap massive tab payloads to keep the 1B model sharply focused on the system instructions
+    if len(summary) > 4000:
+        summary = summary[:4000] + "\n...[truncated]"
+
+    hist_str = json.dumps(history, indent=2) if history else "No answers yet."
+    
+    prompt = (
+        "You are Momentum, a highly observant and empathetic productivity coach. "
+        "Review the user's open tabs and their past answers.\n\n"
+        f"This is Question {index} of 3. Generate ONE short, highly conversational clarifying question "
+        "and 3-4 multiple-choice answer options to understand what they are trying to achieve or why they are stuck.\n\n"
+        "CRITICAL RULE: Your question MUST explicitly reference their actual tabs. "
+        "Mention specific topics, domains, or the amount of tabs open. "
+        "Example Good Question: 'You have 8 tabs open about Python authentication. What is your current goal?'\n"
+        "Example Bad Question: 'What are you working on right now?'\n\n"
+        "Return ONLY a JSON object with exactly these keys:\n"
+        "- question: string\n"
+        "- options: list of 3-4 short strings\n\n"
+        "Respond with valid JSON only. Start with { and end with }."
+    )
+    
+    try:
+        raw = _call_ollama(prompt, f"TABS:\n{summary}\n\nHISTORY:\n{hist_str}")
+        return _parse_json(raw)
+    except:
+        return {
+            "question": f"I see you have {len(tabs)} tabs open. What is your main focus right now?",
+            "options": ["Just getting started", "Stuck on a bug", "Finishing up", "Taking a break"]
+        }
+
+def _generate_final_insight(tabs: list[dict], history: list[dict]) -> dict:
+    summary = _build_tab_summary(tabs)
+    hist_str = json.dumps(history, indent=2)
+    
+    prompt = (
+        "You are Momentum, a thoughtful, warm productivity colleague. "
+        "Review the user's tabs and their clarification answers. "
+        "Return ONLY a JSON object with exactly these keys:\n"
+        "- working_on: one specific sentence referencing their goal based on tabs and history.\n"
+        "- next_action: one hyper-specific first step, including file names or URLs.\n"
+        "- stuck_signal: one sentence or null if they are completely focused.\n"
+        "- memory_summary: a 2-3 sentence paragraph in second person summarising their session warmly (e.g. 'You're deep into X...').\n"
+        "- supporting_tasks: a JSON array of exactly 2 to 3 small related secondary tasks that suit the current project. Each must be a JSON object: {\"task\": \"Specific short task\", \"energy\": \"high\" | \"medium\" | \"low\"}\n\n"
+        "Respond with valid JSON only. Start with { and end with }."
+    )
+    
+    try:
+        raw = _call_ollama(prompt, f"TABS:\n{summary}\n\nHISTORY:\n{hist_str}")
+        return _parse_json(raw)
+    except:
+        return {
+            "working_on": "Could not determine.",
+            "next_action": "Try reducing open tabs.",
+            "stuck_signal": None,
+            "memory_summary": "The AI was unable to parse this session.",
+            "supporting_tasks": []
+        }
+
 
 # ── ENDPOINTS ──────────────────────────────────────────────────────
 
@@ -207,31 +249,44 @@ def receive_tabs(payload: TabPayload):
     if not payload.tabs:
         raise HTTPException(status_code=400, detail="No tabs provided.")
 
-    insight = _get_insight(payload.tabs)
-    tab_count = len(payload.tabs)
-    _store_session(insight, tab_count)
+    tabs_dump = [t.dict() for t in payload.tabs]
+    
+    # Generate initial focus score & Q1
+    score_data = _generate_focus_score(tabs_dump)
+    q1_data = _generate_question(tabs_dump, [], 1)
 
-    # TODO: Enrich focus_score with historical session data —
-    #       e.g. rolling average, trend direction, time-of-day patterns.
+    conn = _get_db()
+    conn.execute(
+        """
+        INSERT INTO sessions (
+            timestamp, tab_count, focus_score, focus_label,
+            raw_tabs_json, history_json, current_question, current_options,
+            question_count, is_draft
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            datetime.datetime.utcnow().isoformat(),
+            len(tabs_dump),
+            score_data.get("focus_score", 50),
+            score_data.get("focus_label", "Getting scattered"),
+            json.dumps(tabs_dump),
+            "[]",
+            q1_data.get("question", "What are you working on?"),
+            json.dumps(q1_data.get("options", [])),
+            1,
+            1  # is_draft
+        )
+    )
+    conn.commit()
+    conn.close()
 
-    return {
-        "success": True,
-        "focus_score": insight["focus_score"],
-        "focus_label": insight["focus_label"],
-        "insight": {
-            "working_on": insight["working_on"],
-            "next_action": insight["next_action"],
-            "stuck_signal": insight.get("stuck_signal"),
-        },
-        "tab_count": tab_count,
-    }
+    return {"success": True}
 
 
 @app.post("/scan")
 def trigger_scan():
     """Trigger a manual scan by running tab_reader.py as a subprocess."""
     try:
-        # Run the tab_reader.py script with --once flag
         result = subprocess.run(
             [sys.executable, "tab_reader.py", "--once"],
             capture_output=True,
@@ -241,8 +296,151 @@ def trigger_scan():
         if result.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Scan failed: {result.stderr}")
         return {"success": True}
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Scan timed out")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/clarify")
+def clarify_endpoint(payload: ClarifyPayload):
+    conn = _get_db()
+    row = conn.execute("SELECT * FROM sessions WHERE id = ?", (payload.session_id,)).fetchone()
+    if not row or not row["is_draft"]:
+        conn.close()
+        raise HTTPException(400, "Invalid session or not a draft.")
+        
+    history = json.loads(row["history_json"])
+    history.append({"question": row["current_question"], "answer": payload.answer})
+    q_index = row["question_count"] + 1
+    tabs = json.loads(row["raw_tabs_json"])
+    
+    if q_index > 3:
+        # Final Step: Generate final insight based on history + tabs
+        insight = _generate_final_insight(tabs, history)
+        
+        sup_tasks = insight.get("supporting_tasks", [])
+        for t in sup_tasks:
+            if "done" not in t:
+                t["done"] = False
+
+        conn.execute(
+            """
+            UPDATE sessions 
+            SET working_on = ?, next_action = ?, stuck_signal = ?, memory_summary = ?, 
+                history_json = ?, is_draft = 0, supporting_tasks = ?
+            WHERE id = ?
+            """,
+            (
+                insight.get("working_on"),
+                insight.get("next_action"),
+                insight.get("stuck_signal"),
+                insight.get("memory_summary"),
+                json.dumps(history),
+                json.dumps(sup_tasks),
+                payload.session_id
+            )
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "complete"}
+    else:
+        # Generate Next Question
+        q_data = _generate_question(tabs, history, q_index)
+        conn.execute(
+            """
+            UPDATE sessions 
+            SET history_json = ?, current_question = ?, current_options = ?, question_count = ?
+            WHERE id = ?
+            """,
+            (
+                json.dumps(history),
+                q_data.get("question", "?"),
+                json.dumps(q_data.get("options", [])),
+                q_index,
+                payload.session_id
+            )
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "clarifying"}
+
+
+@app.post("/chat")
+def chat_endpoint(payload: ChatPayload):
+    # Chat remains identical
+    context_str = "No open tabs."
+    try:
+        resp = httpx.get("http://localhost:9222/json", timeout=2.0)
+        if resp.status_code == 200:
+            tabs = [
+                t for t in resp.json()
+                if t.get("type") == "page" and not t.get("url", "").startswith("chrome")
+            ]
+            if tabs:
+                lines = [f"- {t.get('title', 'Unknown')} ({t.get('url', '')})" for t in tabs]
+                context_str = "\n".join(lines)
+    except Exception:
+        pass
+
+    conn = _get_db()
+    row = conn.execute("SELECT memory_summary FROM sessions WHERE is_draft=0 ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    memory = row["memory_summary"] if row else "No previous sessions."
+
+    system_prompt = (
+        "You are Momentum, a proactive productivity coach like Claude. "
+        "Keep your answers brief, friendly, and highly actionable.\n\n"
+        f"LAST SESSION MEMORY:\n{memory}\n\n"
+        f"CURRENT OPEN TABS:\n{context_str}\n\n"
+        "INSTRUCTIONS:\n"
+        "1. Ask a sharp question to understand what they need to do next, before giving long advice.\n"
+        "2. Help them focus their intent for the upcoming session."
+    )
+
+    messages = [{"role": "system", "content": system_prompt}]
+    
+    user_msgs = payload.messages
+    if not user_msgs:
+        user_msgs = [ChatMessage(role="user", content="I just opened the chat. What should I focus on?")]
+        
+    for m in user_msgs:
+        messages.append({"role": m.role, "content": m.content})
+
+    if not GEMINI_API_KEY:
+        try:
+            resp = httpx.post(
+                f"{OLLAMA_BASE_URL}/v1/chat/completions",
+                json={"model": OLLAMA_MODEL, "messages": messages, "stream": False},
+                timeout=120.0,
+            )
+            resp.raise_for_status()
+            return {"reply": resp.json()["choices"][0]["message"]["content"]}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+            
+    contents = []
+    for m in user_msgs:
+        role = "model" if m.role == "ai" else "user"
+        contents.append({"role": role, "parts": [{"text": m.content}]})
+
+    gemini_payload = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": contents,
+        "tools": [{"googleSearch": {}}]
+    }
+
+    try:
+        resp = httpx.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}",
+            json=gemini_payload,
+            timeout=120.0,
+        )
+        resp.raise_for_status()
+        reply_data = resp.json()
+        try:
+            reply_text = reply_data["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError):
+            reply_text = "Sorry, I received an invalid response from Gemini."
+        return {"reply": reply_text}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -251,27 +449,28 @@ def trigger_scan():
 def get_focus():
     conn = _get_db()
     row = conn.execute(
-        "SELECT focus_score, focus_label, tab_count, timestamp "
-        "FROM sessions ORDER BY id DESC LIMIT 1"
+        "SELECT * FROM sessions ORDER BY id DESC LIMIT 1"
     ).fetchone()
     conn.close()
 
     if row is None:
-        return {
-            "focus_score": None,
-            "focus_label": None,
-            "tab_count": 0,
-            "updated_at": None,
-        }
+        return {"session_id": None, "tab_count": 0, "is_draft": False}
 
-    # TODO: Could blend the latest score with a rolling average of the
-    #       last N sessions for a smoother focus trend on the frontend.
+    options = []
+    if row["current_options"] and row["is_draft"]:
+        try: options = json.loads(row["current_options"])
+        except: pass
 
     return {
+        "session_id": row["id"],
         "focus_score": row["focus_score"],
         "focus_label": row["focus_label"],
         "tab_count": row["tab_count"],
         "updated_at": row["timestamp"],
+        "is_draft": bool(row["is_draft"]),
+        "question": row["current_question"] if row["is_draft"] else None,
+        "options": options if row["is_draft"] else [],
+        "question_count": row["question_count"] if row["is_draft"] else 0
     }
 
 
@@ -280,29 +479,28 @@ def get_sessions():
     conn = _get_db()
     rows = conn.execute(
         "SELECT timestamp, working_on, next_action, stuck_signal, "
-        "focus_score, focus_label FROM sessions ORDER BY id DESC LIMIT 10"
+        "focus_score, focus_label, supporting_tasks FROM sessions WHERE is_draft = 0 ORDER BY id DESC LIMIT 10"
     ).fetchall()
     conn.close()
-
-    # TODO: Add a session_duration field once we track session start/end
-    #       and use it to weight focus_score trends over time.
-
-    return {
-        "sessions": [dict(r) for r in rows],
-    }
+    
+    out = []
+    for r in rows:
+        d = dict(r)
+        try: d["supporting_tasks"] = json.loads(d["supporting_tasks"])
+        except: d["supporting_tasks"] = []
+        out.append(d)
+        
+    return {"sessions": out}
 
 
 @app.get("/memory")
 def get_memory():
     conn = _get_db()
     row = conn.execute(
-        "SELECT memory_summary FROM sessions ORDER BY id DESC LIMIT 1"
+        "SELECT memory_summary FROM sessions WHERE is_draft = 0 ORDER BY id DESC LIMIT 1"
     ).fetchone()
     conn.close()
-
-    return {
-        "memory_summary": row["memory_summary"] if row else None,
-    }
+    return {"memory_summary": row["memory_summary"] if row else None}
 
 
 @app.get("/health")

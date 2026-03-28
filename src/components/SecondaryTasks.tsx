@@ -1,34 +1,28 @@
-import { useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { scoreColor } from "@/hooks/useApi";
+import { SessionTask } from "@/hooks/useApi";
 
-interface SessionTask {
-  id: string;
-  workingOn: string;
-  focusScore: number;
-  focusLabel: string;
-  done: boolean;
+export interface TaskItem extends SessionTask {
+  index: number;
 }
 
 const pillColor = {
   high: "bg-score-high/10 text-score-high",
-  mid: "bg-score-mid/10 text-score-mid",
+  medium: "bg-score-mid/10 text-score-mid",
   low: "bg-score-low/10 text-score-low",
 };
 
-const SecondaryTasks = ({ tasks: initial }: { tasks: SessionTask[] }) => {
-  const [tasks, setTasks] = useState(initial);
-
-  const toggle = (id: string) =>
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t))
-    );
-
+const SecondaryTasks = ({ 
+  tasks, 
+  onToggle 
+}: { 
+  tasks: TaskItem[], 
+  onToggle: (index: number, done: boolean) => void 
+}) => {
   if (tasks.length === 0) {
     return (
       <div className="bg-card rounded-lg border border-border px-4 py-5 text-center">
         <p className="text-sm text-muted-foreground">
-          No previous sessions yet — your recent tasks will appear here.
+          No secondary tasks auto-generated for this session.
         </p>
       </div>
     );
@@ -38,14 +32,14 @@ const SecondaryTasks = ({ tasks: initial }: { tasks: SessionTask[] }) => {
     <div className="space-y-2">
       {tasks.map((t) => (
         <div
-          key={t.id}
+          key={t.index}
           className={`flex items-center gap-3 bg-card rounded-lg px-4 py-3 border border-border transition-all duration-200 ${
             t.done ? "opacity-50" : ""
           }`}
         >
           <Checkbox
             checked={t.done}
-            onCheckedChange={() => toggle(t.id)}
+            onCheckedChange={(checked) => onToggle(t.index, !!checked)}
             className="border-muted-foreground/40"
           />
           <span
@@ -53,14 +47,14 @@ const SecondaryTasks = ({ tasks: initial }: { tasks: SessionTask[] }) => {
               t.done ? "line-through text-muted-foreground" : "text-foreground"
             }`}
           >
-            {t.workingOn}
+            {t.task}
           </span>
           <span
-            className={`text-xs px-2.5 py-0.5 rounded-full font-medium shrink-0 ${
-              pillColor[scoreColor(t.focusScore)]
+            className={`text-[10px] uppercase tracking-wider px-2.5 py-0.5 rounded-full font-bold shrink-0 ${
+              pillColor[t.energy] || "bg-secondary text-primary"
             }`}
           >
-            {t.focusScore}
+            {t.energy} energy
           </span>
         </div>
       ))}

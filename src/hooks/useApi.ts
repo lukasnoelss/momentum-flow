@@ -5,10 +5,20 @@ const BASE = "http://localhost:8000";
 // ── types ──────────────────────────────────────────────────────────────────
 
 export interface FocusData {
+  session_id: number | null;
   focus_score: number | null;
   focus_label: string | null;
   tab_count: number;
   updated_at: string | null;
+  is_draft?: boolean;
+  question?: string | null;
+  options?: string[];
+  question_count?: number;
+}
+
+export interface SessionTask {
+  task: string;
+  energy: "high" | "medium" | "low";
 }
 
 export interface Session {
@@ -18,6 +28,7 @@ export interface Session {
   stuck_signal: string | null;
   focus_score: number;
   focus_label: string;
+  supporting_tasks: SessionTask[];
 }
 
 export interface SessionsData {
@@ -81,6 +92,61 @@ export function useScan() {
       queryClient.invalidateQueries({ queryKey: ["focus"] });
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       queryClient.invalidateQueries({ queryKey: ["memory"] });
+    },
+  });
+}
+
+/** Sends a chat message to the backend and returns the AI's reply */
+export function useChat() {
+  return useMutation({
+    mutationFn: async (payload: { messages: { role: "ai" | "user" | "system", content: string }[] }) => {
+      const res = await fetch(`${BASE}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error("Chat request failed");
+      return await res.json() as { reply: string };
+    },
+  });
+}
+
+/** Sends a user intent selection back to the backend */
+export function useClarify() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { session_id: number; answer: string }) => {
+      const res = await fetch(`${BASE}/clarify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error("Clarify failed");
+      return await res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["focus"] });
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      queryClient.invalidateQueries({ queryKey: ["memory"] });
+    },
+  });
+}
+
+/** Toggles the 'done' state of a supporting task in a session */
+export function useToggleTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { session_id: number; task_index: number; done: boolean }) => {
+      const res = await fetch(`${BASE}/tasks/toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error("Toggle task failed");
+      return await res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
   });
 }

@@ -136,7 +136,17 @@ const Index = () => {
         </div>
       </div>
 
-      {isReturning ? (
+      {scanMutation.isPending ? (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] animate-pulse max-w-xl mx-auto text-center">
+          <div className="w-20 h-20 rounded-3xl bg-primary/10 flex items-center justify-center mb-6 animate-spin-slow">
+            <RefreshCw className="w-10 h-10 text-primary animate-spin" />
+          </div>
+          <h2 className="text-2xl font-display text-foreground mb-3">Syncing your focus…</h2>
+          <p className="text-muted-foreground text-sm max-w-xs">
+            Momentum is reading your active tabs and analysing your current work context.
+          </p>
+        </div>
+      ) : isReturning ? (
         <div className="flex flex-col items-center justify-center min-h-[50vh] animate-fade-in max-w-xl mx-auto text-center">
           <div className="rounded-3xl p-8 w-full">
             <h2 className="text-xl md:text-2xl font-display text-foreground mb-4">You were working on {latest.working_on}</h2>

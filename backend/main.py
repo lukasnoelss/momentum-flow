@@ -417,7 +417,7 @@ def _generate_final_insight(tabs: list[dict], history: list[dict]) -> dict:
         "- next_action: one hyper-specific first step directed at the user ('Next, you should...')\n"
         "- stuck_signal: one sentence addressing the user ('You seem a bit stuck on X...') or null.\n"
         "- memory_summary: a 2-3 sentence paragraph in second person summarising their session warmly (e.g. 'You're deep into X...').\n"
-        "- supporting_tasks: a JSON array of exactly 2 to 3 small related secondary tasks that suit the current project. Each must be a JSON object: {\"task\": \"Specific short task\", \"energy\": \"high\" | \"medium\" | \"low\"}\n\n"
+        "- supporting_tasks: a JSON array of exactly 3 to 4 small related secondary tasks that suit the current project. Each must be a JSON object: {\"task\": \"Specific short task\", \"energy\": \"high\" | \"medium\" | \"low\"}\n\n"
         "Respond with valid JSON only. Start with { and end with }."
     )
     
@@ -431,7 +431,11 @@ def _generate_final_insight(tabs: list[dict], history: list[dict]) -> dict:
             "next_action": "Try reducing open tabs.",
             "stuck_signal": None,
             "memory_summary": "The AI was unable to parse this session.",
-            "supporting_tasks": []
+            "supporting_tasks": [
+                {"task": "Check open tabs", "energy": "low"},
+                {"task": "Define next hour goal", "energy": "medium"},
+                {"task": "Clean up workspace", "energy": "low"}
+            ]
         }
 
 

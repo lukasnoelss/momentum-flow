@@ -43,39 +43,39 @@ const Index = () => {
 
   return (
     <AppShell>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      {/* Hero Header */}
+      <div className="flex items-center justify-between mb-8 md:mb-10">
         <div>
           <h1 className="text-3xl md:text-4xl font-display text-foreground">
             {greeting()}, {userName}
           </h1>
+          <p className="text-muted-foreground text-sm mt-1">Here's your momentum today</p>
         </div>
-        <div className="flex items-center gap-1.5 text-primary">
+        <div className="flex items-center gap-1.5 bg-secondary text-primary px-3 py-1.5 rounded-full">
           <Flame className="w-4 h-4" />
-          <span className="text-sm font-semibold">{streakDays}d</span>
+          <span className="text-sm font-semibold">{streakDays} day streak</span>
         </div>
       </div>
 
-      {/* Focus Score */}
-      <FocusScore score={score} label={focusLabel(score)} />
+      {/* Dashboard grid */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-5 md:gap-6 mb-6">
+        {/* Left column — Focus score + AI memory */}
+        <div className="md:col-span-5 space-y-5">
+          <div className="bg-card rounded-2xl border border-border p-6">
+            <FocusScore score={score} label={focusLabel(score)} />
+          </div>
+          <ContextBar message={aiMemory} />
+        </div>
 
-      {/* AI Memory */}
-      <div className="mb-5">
-        <ContextBar message={aiMemory} />
-      </div>
-
-      {/* Featured Task */}
-      <div className="mb-5">
-        <FeaturedTask {...featuredTask} />
-      </div>
-
-      {/* Secondary Tasks */}
-      <div className="mb-6">
-        <SecondaryTasks tasks={secondaryTasks} />
+        {/* Right column — Tasks */}
+        <div className="md:col-span-7 space-y-5">
+          <FeaturedTask {...featuredTask} />
+          <SecondaryTasks tasks={secondaryTasks} />
+        </div>
       </div>
 
       {/* Ask bar */}
-      <div className="flex items-center gap-2 bg-card border border-border rounded-xl px-4 py-2.5">
+      <div className="flex items-center gap-2 bg-card border border-border rounded-xl px-4 py-3">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -83,7 +83,7 @@ const Index = () => {
           placeholder="Ask Momentum anything…"
           className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
         />
-        <button onClick={handleAsk} className="text-primary">
+        <button onClick={handleAsk} className="text-primary hover:text-primary/80 transition-colors">
           <Send className="w-4 h-4" />
         </button>
       </div>

@@ -14,7 +14,7 @@ const BottomNav = () => {
 
   return (
     <nav className="fixed top-0 left-0 right-0 bg-card/80 backdrop-blur-lg border-b border-border z-50">
-      <div className="max-w-3xl mx-auto px-6 md:px-10 flex items-center justify-between h-14">
+      <div className="max-w-5xl mx-auto px-6 md:px-10 flex items-center justify-between h-14">
         <span className="text-lg font-display text-foreground tracking-tight">Momentum</span>
         <div className="flex gap-1">
           {tabs.map(({ path, icon: Icon, label }) => {

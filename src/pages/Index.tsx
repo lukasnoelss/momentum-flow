@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Flame, Send, Wifi, WifiOff, RefreshCw, Sun, Coffee, Moon } from "lucide-react";
+import { Flame, Send, Wifi, WifiOff, RefreshCw, Sun, Coffee, Moon, Rocket } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import FocusScore from "@/components/FocusScore";
 import ContextBar from "@/components/ContextBar";

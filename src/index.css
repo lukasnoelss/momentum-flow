@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=DM+Serif+Display&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,53 +6,58 @@
 
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 240 10% 12%;
+    --background: 230 25% 95%;
+    --foreground: 230 25% 10%;
 
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 12%;
+    --card-foreground: 230 25% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 12%;
+    --popover-foreground: 230 25% 10%;
 
-    --primary: 248 42% 50%;
+    --primary: 252 56% 57%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 248 20% 96%;
-    --secondary-foreground: 248 42% 50%;
+    --secondary: 252 30% 96%;
+    --secondary-foreground: 252 56% 57%;
 
-    --muted: 240 6% 94%;
-    --muted-foreground: 220 9% 46%;
+    --muted: 230 12% 92%;
+    --muted-foreground: 230 8% 46%;
 
-    --accent: 248 42% 50%;
+    --accent: 252 56% 57%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 240 6% 92%;
-    --input: 240 6% 90%;
-    --ring: 248 42% 50%;
+    --border: 230 12% 90%;
+    --input: 230 12% 88%;
+    --ring: 252 56% 57%;
 
     --radius: 1rem;
 
-    /* Focus score colors */
-    --score-high: 157 69% 37%;
-    --score-mid: 37 78% 41%;
-    --score-low: 17 68% 36%;
+    /* Focus score colors — vivid */
+    --score-high: 160 72% 35%;
+    --score-mid: 36 86% 54%;
+    --score-low: 14 65% 53%;
+
+    /* Raw hex for CSS usage */
+    --score-high-hex: #16A276;
+    --score-mid-hex: #EFA327;
+    --score-low-hex: #D65D3C;
 
     /* Surfaces */
     --surface-raised: 0 0% 100%;
-    --surface-sunken: 240 6% 97%;
+    --surface-sunken: 230 15% 97%;
 
     --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-foreground: 230 5% 26%;
+    --sidebar-primary: 230 6% 10%;
     --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-accent: 230 5% 96%;
+    --sidebar-accent-foreground: 230 6% 10%;
     --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-ring: 217 91% 60%;
   }
 }
 
@@ -63,6 +68,8 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    background: linear-gradient(135deg, hsl(230 25% 95%) 0%, hsl(252 20% 94%) 50%, hsl(230 25% 95%) 100%);
+    min-height: 100vh;
   }
 
   h1, h2, h3 {
@@ -70,23 +77,89 @@
   }
 }
 
+/* ── Focus Score Orb ───────────────────────────────────── */
+
+@keyframes orb-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.4; }
+  50% { transform: scale(1.2); opacity: 0.85; }
+}
+
+@keyframes orb-rotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.orb-aura {
+  animation: orb-breathe 5s ease-in-out infinite;
+}
+
+.orb-ring-spin {
+  animation: orb-rotate 20s linear infinite;
+}
+
+.orb-glass {
+  background: linear-gradient(
+    145deg,
+    rgba(255,255,255,0.15) 0%,
+    rgba(255,255,255,0.05) 40%,
+    rgba(0,0,0,0.05) 100%
+  );
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.2);
+}
+
+.orb-inner-glow-high {
+  background: radial-gradient(circle at 35% 35%, rgba(22,162,118,0.3) 0%, rgba(22,162,118,0.08) 50%, transparent 70%);
+}
+.orb-inner-glow-mid {
+  background: radial-gradient(circle at 35% 35%, rgba(239,163,39,0.3) 0%, rgba(239,163,39,0.08) 50%, transparent 70%);
+}
+.orb-inner-glow-low {
+  background: radial-gradient(circle at 35% 35%, rgba(214,93,60,0.3) 0%, rgba(214,93,60,0.08) 50%, transparent 70%);
+}
+
+/* Progress arc inside orb */
+.orb-progress {
+  stroke-dasharray: 502;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s ease-in-out;
+}
+
+/* Streak shimmer */
+.streak-shimmer {
+  background: linear-gradient(90deg, hsl(252 56% 57%) 0%, hsl(252 70% 70%) 50%, hsl(252 56% 57%) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+/* Glow utilities */
 @layer utilities {
   .score-glow-high {
-    box-shadow: 0 0 60px 16px hsl(157 69% 37% / 0.25);
+    box-shadow: 0 0 80px 30px rgba(22,162,118,0.35), 0 0 160px 60px rgba(22,162,118,0.15);
   }
   .score-glow-mid {
-    box-shadow: 0 0 60px 16px hsl(37 78% 41% / 0.25);
+    box-shadow: 0 0 80px 30px rgba(239,163,39,0.35), 0 0 160px 60px rgba(239,163,39,0.15);
   }
   .score-glow-low {
-    box-shadow: 0 0 60px 16px hsl(17 68% 36% / 0.25);
+    box-shadow: 0 0 80px 30px rgba(214,93,60,0.35), 0 0 160px 60px rgba(214,93,60,0.15);
+  }
+
+  .card-glow {
+    box-shadow: 0 4px 24px -4px rgba(108,93,211,0.12), 0 0 0 1px rgba(108,93,211,0.06);
   }
 }
 
-@keyframes breathe {
-  0%, 100% { transform: scale(1); opacity: 0.5; }
-  50% { transform: scale(1.15); opacity: 1; }
+/* Fade in */
+@keyframes fade-in {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
 }
 
-.animate-breathe {
-  animation: breathe 4s ease-in-out infinite;
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out;
 }

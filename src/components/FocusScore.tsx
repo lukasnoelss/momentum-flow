@@ -5,31 +5,84 @@ interface FocusScoreProps {
   label: string;
 }
 
-const colorClasses = {
-  high: { ring: "border-score-high", glow: "score-glow-high", text: "text-score-high" },
-  mid: { ring: "border-score-mid", glow: "score-glow-mid", text: "text-score-mid" },
-  low: { ring: "border-score-low", glow: "score-glow-low", text: "text-score-low" },
+const colorMap = {
+  high: {
+    glow: "score-glow-high",
+    text: "text-score-high",
+    inner: "orb-inner-glow-high",
+    stroke: "var(--score-high-hex)",
+    icon: "🎯",
+  },
+  mid: {
+    glow: "score-glow-mid",
+    text: "text-score-mid",
+    inner: "orb-inner-glow-mid",
+    stroke: "var(--score-mid-hex)",
+    icon: "⚡",
+  },
+  low: {
+    glow: "score-glow-low",
+    text: "text-score-low",
+    inner: "orb-inner-glow-low",
+    stroke: "var(--score-low-hex)",
+    icon: "🌊",
+  },
 };
 
 const FocusScore = ({ score, label }: FocusScoreProps) => {
   const level = scoreColor(score);
-  const classes = colorClasses[level];
+  const c = colorMap[level];
+  const circumference = 2 * Math.PI * 80; // r=80
+  const offset = circumference - (score / 100) * circumference;
 
   return (
-    <div className="flex flex-col items-center gap-4 py-10">
-      <div className="relative flex items-center justify-center">
-        {/* Breathing glow ring */}
-        <div
-          className={`absolute w-44 h-44 rounded-full border ${classes.ring} ${classes.glow} animate-breathe blur-[2px]`}
+    <div className="flex flex-col items-center gap-5 py-8">
+      <div className="relative flex items-center justify-center w-52 h-52">
+        {/* Deep aura */}
+        <div className={`absolute inset-[-30px] rounded-full ${c.glow} orb-aura`} />
+
+        {/* Spinning gradient ring */}
+        <div className="absolute inset-[-4px] rounded-full orb-ring-spin"
+          style={{
+            background: `conic-gradient(from 0deg, transparent 0%, ${c.stroke} 25%, transparent 50%, ${c.stroke} 75%, transparent 100%)`,
+            opacity: 0.15,
+          }}
         />
-        {/* Score number — massive & elegant */}
-        <span className={`text-8xl font-light tracking-tighter ${classes.text} relative z-10`} style={{ fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 200 }}>
+
+        {/* Glass orb */}
+        <div className="absolute inset-0 rounded-full orb-glass" />
+
+        {/* Inner glow */}
+        <div className={`absolute inset-0 rounded-full ${c.inner}`} />
+
+        {/* Progress arc */}
+        <svg className="absolute inset-0 -rotate-90" viewBox="0 0 200 200">
+          <circle cx="100" cy="100" r="80" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="4" />
+          <circle
+            cx="100" cy="100" r="80"
+            fill="none"
+            stroke={c.stroke}
+            strokeWidth="4"
+            className="orb-progress"
+            style={{ strokeDashoffset: offset, strokeDasharray: circumference }}
+          />
+        </svg>
+
+        {/* Score number */}
+        <span
+          className={`text-7xl ${c.text} relative z-10 drop-shadow-lg`}
+          style={{ fontFamily: 'Inter, system-ui', fontWeight: 200, letterSpacing: '-0.04em' }}
+        >
           {score}
         </span>
       </div>
-      <p className="text-[11px] text-muted-foreground font-medium tracking-[0.2em] uppercase">
-        {label}
-      </p>
+
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm">{c.icon}</span>
+        <p className={`text-xs font-bold tracking-[0.15em] uppercase ${c.text}`}>
+          {label}
+        </p>
+      </div>
     </div>
   );
 };
